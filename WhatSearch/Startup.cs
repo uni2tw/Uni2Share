@@ -95,6 +95,7 @@ namespace WhatSearch
             app.UseMiddleware<CustomSecurityHeadersMiddleware>();
             app.UseMiddleware<UserAuthenticationMiddleware>();
             app.UseMiddleware<PlaybackLogMiddleware>();
+            app.UseMiddleware<PlaybackMonitorMiddleware>();
             //app.MapWhen(context => context.Request.Path.ToString().EndsWith(".md"),
             //    appBuilder =>
             //    {

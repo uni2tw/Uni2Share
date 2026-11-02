@@ -3,6 +3,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using WhatSearch.Core;
+using WhatSearch.Service;
 using WhatSearch.Models;
 using WhatSearch.Services;
 using WhatSearch.Services.Interfaces;
@@ -199,6 +200,47 @@ namespace WhatSearch.Controllers
         {
             int n = Ioc.Get<IVideoConvertService>().ClearFinished();
             return new { Success = 1, Cleared = n, Message = n > 0 ? string.Format("已清除 {0} 筆紀錄", n) : "沒有可清除的紀錄" };
+        }
+
+        /// <summary>播放監控頁：誰正在播什麼、目前速率、今日流量、熱門內容、伺服器狀態</summary>
+        [Route("admin/monitor")]
+        [RoleAuthorize("Admin")]
+        public IActionResult MonitorPage()
+        {
+            return View("Monitor");
+        }
+
+        [HttpGet]
+        [Route("admin/monitor/data")]
+        [RoleAuthorize("Admin")]
+        public dynamic MonitorData()
+        {
+            PlaybackSnapshot snap = Ioc.Get<IPlaybackMonitorService>().GetSnapshot();
+            List<ConvertJob> jobs = Ioc.Get<IVideoConvertService>().GetJobs();
+            ITranscodeService transcode = Ioc.Get<ITranscodeService>();
+            return new
+            {
+                sessions = snap.Sessions,
+                mbps = snap.Mbps,
+                todayBytes = snap.TodayBytes,
+                todayPlays = snap.TodayPlays,
+                slowCount = snap.SlowCount,
+                hours = snap.Hours,
+                users = snap.Users,
+                folders = snap.Folders,
+                devices = snap.Devices,
+                weekPlays = snap.WeekPlays,
+                server = new
+                {
+                    startedAt = snap.StartedAtMs,
+                    convertRunning = jobs.Count(j => j.State == ConvertJob.StateRunning),
+                    convertPending = jobs.Count(j => j.State == ConvertJob.StatePending),
+                    transcodeEnabled = transcode.Enabled,
+                    cacheBytes = transcode.CacheBytes,
+                    cacheLimitBytes = transcode.CacheLimitBytes,
+                    indexedFiles = Ioc.Get<ISearchSercice>().DocCount
+                }
+            };
         }
 
         public class ConvertEnqueueModel

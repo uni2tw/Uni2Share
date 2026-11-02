@@ -65,7 +65,7 @@ namespace WhatSearch.Middlewares
             }
         }
 
-        static bool IsMediaRequest(HttpRequest request)
+        public static bool IsMediaRequest(HttpRequest request)
         {
             if (HttpMethods.IsGet(request.Method) == false && HttpMethods.IsHead(request.Method) == false)
             {
