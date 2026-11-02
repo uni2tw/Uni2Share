@@ -994,7 +994,8 @@
                 <input type="text" class="form-control form-control-sm" v-model="coverEdit.keyword" maxlength="100" placeholder="作品名稱（中文查不到時改日文或英文）" />
                 <button type="submit" class="btn btn-sm btn-primary" style="white-space:nowrap;" :disabled="coverEdit.loading || coverEdit.saving"><i class="fa fa-search"></i> 搜尋</button>
             </form>
-            <div style="font-size:12px; color:#888; margin:6px 0;">從 AniList 找候選圖。選一張就會存成這個資料夾的 cover.jpg（已經有的會被覆蓋）。</div>
+            <div style="font-size:12px; color:#888; margin:6px 0;">從 AniList 與 Bangumi（中文名稱比較查得到）找候選圖。選一張就會存成這個資料夾的 cover.jpg（已經有的會被覆蓋）。</div>
+            <div v-if="coverEdit.warning" style="color:#b26a00; font-size:12px; margin-bottom:6px;"><i class="fa fa-triangle-exclamation"></i> {{ coverEdit.warning }}</div>
             <div v-if="coverEdit.loading" style="color:#888; padding:14px 0;">搜尋中…</div>
             <div v-else-if="coverEdit.error" style="color:#dc3545; padding:8px 0; font-size:14px;">{{ coverEdit.error }}</div>
             <div v-else-if="coverEdit.searched && coverEdit.items.length === 0" style="color:#888; padding:8px 0; font-size:14px;">找不到，換個關鍵字試試</div>
@@ -1003,6 +1004,7 @@
                     <img :src="c.thumb" referrerpolicy="no-referrer" loading="lazy" style="width:100%; aspect-ratio:2/3; object-fit:cover; border-radius:6px; display:block; background:#eee;" />
                     <div style="font-size:12px; line-height:1.3; margin-top:3px; word-break:break-all;">{{ c.title }}</div>
                     <div style="font-size:11px; color:#888;">{{ c.year || '' }} {{ c.format || '' }}</div>
+                    <div style="font-size:10px; color:#999;">{{ c.source }}</div>
                 </div>
             </div>
             <div v-if="coverEdit.saving" style="color:#888; padding:10px 0; font-size:14px;"><i class="fa fa-spinner fa-spin"></i> 儲存中…</div>
@@ -2348,7 +2350,7 @@
                         return;
                     }
                     let st = { folderId: this.currentRating.id, keyword: this.currentRating.name || '', loading: false, saving: false, searched: false, error: '', items: [],
-                        current: '', currentSource: '', currentSize: '', currentLoading: true };
+                        current: '', currentSource: '', currentSize: '', currentLoading: true, warning: '' };
                     this.coverEdit = st;
                     api.coverInfo(st.folderId).then(res => {
                         if (res.data.exists) {
@@ -2387,8 +2389,10 @@
                     }
                     st.loading = true;
                     st.error = '';
+                    st.warning = '';
                     api.coverCandidates(st.folderId, keyword).then(res => {
                         st.items = res.data.items || [];
+                        st.warning = (res.data.warnings || []).join('；');
                         st.searched = true;
                     }).catch(err => {
                         st.items = [];
