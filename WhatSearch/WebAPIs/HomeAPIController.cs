@@ -486,7 +486,7 @@ namespace WhatSearch.WebAPIs
         }
 
         /// <summary>
-        /// 管理者幫動畫資料夾找封面：用名稱到 AniList 搜尋，回傳候選封面（縮圖與大圖網址）。只限可評分的動畫資料夾。
+        /// 管理者幫動畫資料夾找封面：用名稱同時到 AniList 與 Bangumi 搜尋，回傳候選封面（縮圖與大圖網址）。只限可評分的動畫資料夾。
         /// </summary>
         [HttpGet]
         [Route("api/covercandidates")]
@@ -513,10 +513,11 @@ namespace WhatSearch.WebAPIs
             }
             try
             {
-                List<CoverCandidate> list = await Ioc.Get<ICoverSearchService>().SearchAsync(keyword);
+                CoverSearchResult result = await Ioc.Get<ICoverSearchService>().SearchAsync(keyword);
                 return Ok(new
                 {
-                    items = list.Select(t => new { title = t.Title, sub_title = t.SubTitle, year = t.Year, format = t.Format, thumb = t.Thumb, image = t.Image })
+                    items = result.Items.Select(t => new { title = t.Title, sub_title = t.SubTitle, year = t.Year, format = t.Format, source = t.Source, thumb = t.Thumb, image = t.Image }),
+                    warnings = result.Warnings
                 });
             }
             catch (InvalidOperationException ex)
@@ -527,7 +528,7 @@ namespace WhatSearch.WebAPIs
 
         /// <summary>
         /// 管理者把選定的候選封面存成資料夾裡的 cover.jpg（已有就覆蓋；先寫到系統暫存目錄再取代，失敗不會留下半張圖）。
-        /// 圖片網址只收 AniList 圖片網域，且內容必須是 JPEG。
+        /// 圖片網址只收 AniList、Bangumi 的圖片網域，且內容必須是 JPEG。
         /// </summary>
         [HttpPost]
         [Route("api/coverset")]
