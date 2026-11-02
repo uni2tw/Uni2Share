@@ -6,9 +6,9 @@
     <RootNamespace>WhatSearch</RootNamespace>
     <AssemblyName>WhatSearch</AssemblyName>
     <PackageId>WhatSearch</PackageId>
-	<Version>1.24.2</Version>
-	<AssemblyVersion>1.24.2</AssemblyVersion>
-	<FileVersion>1.24.2</FileVersion>
+	<Version>1.25.0</Version>
+	<AssemblyVersion>1.25.0</AssemblyVersion>
+	<FileVersion>1.25.0</FileVersion>
 	<DebugType>embedded</DebugType>
   </PropertyGroup>
 

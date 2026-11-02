@@ -634,6 +634,9 @@
                 <button type="button" class="btn btn-sm btn-outline-secondary" style="white-space:nowrap; flex:0 0 auto;" title="複製清單" v-on:click="vm_copyRatingList()">
                     <i class="fa fa-copy"></i> 複製
                 </button>
+                <button type="button" class="btn btn-sm btn-outline-secondary" style="white-space:nowrap; flex:0 0 auto;" title="匯出評分圖（S／A／B／C／D／F）" v-on:click="vm_exportTierList()">
+                    <i class="fa" :class="tierBusy ? 'fa-spinner fa-spin' : 'fa-image'"></i> {{ tierBusy ? (tierProgress || '產生中') : '評分圖' }}
+                </button>
             </template>
         </div>
         <div v-if="filterOptions.length > 0 && !videoGridVisible && !musicGridVisible" style="padding:5px; display:flex; gap:6px; flex-wrap:wrap;">
@@ -951,6 +954,20 @@
         </div>
     </div>
 
+    <div class="lightbox-overlay" v-if="tierPreview" v-on:click.self="vm_closeTierPreview()">
+        <div class="lightbox-overlay-content" style="background:#fff; color:#222; border-radius:8px; padding:12px 14px; max-height:94vh; overflow:auto;">
+            <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; margin-bottom:8px;">
+                <div style="font-weight:bold;">評分圖（{{ tierPreview.count }} 部）</div>
+                <div style="display:flex; gap:6px;">
+                    <a class="btn btn-sm btn-success" :href="tierPreview.url" :download="tierPreview.fileName"><i class="fa fa-download"></i> 下載圖片</a>
+                    <button type="button" class="btn btn-sm btn-outline-secondary" v-on:click="vm_closeTierPreview()"><i class="fa fa-times"></i></button>
+                </div>
+            </div>
+            <img :src="tierPreview.url" style="width:100%; display:block; border-radius:6px;" />
+            <div style="font-size:12px; color:#888; margin-top:6px;">手機：長按圖片可以儲存或分享。<span v-if="tierPreview.missing">有 {{ tierPreview.missing }} 部找不到封面，用名稱色塊代替。</span></div>
+        </div>
+    </div>
+
     <div id="app2"></div>
 
 
@@ -1080,6 +1097,9 @@
                     ratingFilter: 'all',
                     copyMsg: '',
                     copyDialog: null,
+                    tierBusy: false,
+                    tierProgress: '',
+                    tierPreview: null,
                     favAlbumMap: {},
                     favTrackMap: {},
                     favView: false,
@@ -2061,6 +2081,197 @@
                     let lines = [(last && last.text ? last.text + ' ' : '') + '動畫評分清單（滿分 5 分，以 0.5 為單位；未評分表示還沒打分）'];
                     rows.forEach(t => lines.push(this.vm_ratingText(t.title_plain, t.rating)));
                     this.vm_copyText(lines.join('\n'), rows.length + ' 筆');
+                },
+                // ----- 匯出評分圖：依評分分成 S／A／B／C／D／F 六列，每列放作品封面 -----
+                // 5 → S、4.5 → A、4 → B、3.5 → C、3 → D，3 以下（目前最低 2.5）→ F
+                vm_tierOf: function (rating) {
+                    if (rating >= 5) { return 'S'; }
+                    if (rating >= 4.5) { return 'A'; }
+                    if (rating >= 4) { return 'B'; }
+                    if (rating >= 3.5) { return 'C'; }
+                    if (rating >= 3) { return 'D'; }
+                    return 'F';
+                },
+                vm_exportTierList: async function () {
+                    if (this.tierBusy) {
+                        return;
+                    }
+                    // 不受目前的排序與篩選影響：這個資料夾裡所有已評分的作品，同一等級內依名稱排序
+                    let rows = this.allItems.filter(t => t.rateable && t.rating > 0).slice();
+                    if (rows.length === 0) {
+                        this.vm_toast('目前沒有已評分的作品');
+                        return;
+                    }
+                    rows.sort((a, b) => a.title_plain.localeCompare(b.title_plain, undefined, { numeric: true, sensitivity: 'base' }));
+                    this.tierBusy = true;
+                    try {
+                        let covers = new Array(rows.length).fill(null);
+                        let next = 0, done = 0;
+                        let worker = async () => {
+                            while (next < rows.length) {
+                                let i = next++;
+                                covers[i] = await this.vm_loadFolderCover(rows[i].id);
+                                done++;
+                                this.tierProgress = done + ' / ' + rows.length;
+                            }
+                        };
+                        await Promise.all(Array.from({ length: Math.min(6, rows.length) }, worker));
+                        let last = this.breadcrumbs.length ? this.breadcrumbs[this.breadcrumbs.length - 1] : null;
+                        let season = (last && last.text) ? last.text : '動畫';
+                        let blob = await this.vm_drawTierBlob(rows, covers);
+                        if (!blob) {
+                            this.vm_toast('產生圖片失敗');
+                            return;
+                        }
+                        this.vm_closeTierPreview();
+                        this.tierPreview = {
+                            url: URL.createObjectURL(blob),
+                            fileName: season.replace(/[\\/:*?"<>|]/g, '_') + '-評分表.png',
+                            count: rows.length,
+                            missing: covers.filter(c => !c).length
+                        };
+                    } catch (e) {
+                        this.vm_toast('產生圖片失敗');
+                    } finally {
+                        this.tierBusy = false;
+                        this.tierProgress = '';
+                    }
+                },
+                vm_closeTierPreview: function () {
+                    if (this.tierPreview) {
+                        URL.revokeObjectURL(this.tierPreview.url);
+                        this.tierPreview = null;
+                    }
+                },
+                // 取資料夾封面（伺服器找 cover／folder 圖片檔，或影片內嵌的封面）；沒有封面或載入失敗回傳 null
+                vm_loadFolderCover: function (id) {
+                    return fetch('/api/foldercover?id=' + encodeURIComponent(id))
+                        .then(res => res.ok ? res.blob() : null)
+                        .then(blob => {
+                            if (!blob) {
+                                return null;
+                            }
+                            return new Promise(resolve => {
+                                let url = URL.createObjectURL(blob);
+                                let img = new Image();
+                                img.onload = () => { URL.revokeObjectURL(url); resolve(img); };
+                                img.onerror = () => { URL.revokeObjectURL(url); resolve(null); };
+                                img.src = url;
+                            });
+                        })
+                        .catch(() => null);
+                },
+                vm_drawTierBlob: function (rows, covers) {
+                    const TIERS = [
+                        { key: 'S', bg: '#ff6b6b', fg: '#ffffff' },
+                        { key: 'A', bg: '#ff8c00', fg: '#ffffff' },
+                        { key: 'B', bg: '#ffc400', fg: '#7a4a00' },
+                        { key: 'C', bg: '#00d26a', fg: '#064e2b' },
+                        { key: 'D', bg: '#4a9bff', fg: '#ffffff' },
+                        { key: 'F', bg: '#9aa3b2', fg: '#ffffff' }
+                    ];
+                    const W = 985, M = 12, LABEL = 104, TILE = 90, GAP = 8, PAD = 8, SCALE = 2, MIN_ROW = 106, ROW_GAP = 8;
+                    let x0 = M + LABEL + PAD;
+                    let perLine = Math.max(1, Math.floor((W - M - PAD - x0 + GAP) / (TILE + GAP)));
+                    let groups = TIERS.map(t => ({ tier: t, tiles: [] }));
+                    rows.forEach((item, i) => {
+                        let g = groups.find(x => x.tier.key === this.vm_tierOf(item.rating));
+                        g.tiles.push({ item: item, cover: covers[i] });
+                    });
+                    let heights = groups.map(g => {
+                        let lines = Math.max(1, Math.ceil(g.tiles.length / perLine));
+                        return Math.max(MIN_ROW, PAD * 2 + lines * TILE + (lines - 1) * GAP);
+                    });
+                    let H = M * 2 + heights.reduce((a, b) => a + b, 0) + ROW_GAP * (groups.length - 1);
+                    let canvas = document.createElement('canvas');
+                    canvas.width = W * SCALE;
+                    canvas.height = H * SCALE;
+                    let ctx = canvas.getContext('2d');
+                    ctx.scale(SCALE, SCALE);
+                    let roundRect = (x, y, w, h, r) => {
+                        ctx.beginPath();
+                        ctx.moveTo(x + r, y);
+                        ctx.arcTo(x + w, y, x + w, y + h, r);
+                        ctx.arcTo(x + w, y + h, x, y + h, r);
+                        ctx.arcTo(x, y + h, x, y, r);
+                        ctx.arcTo(x, y, x + w, y, r);
+                        ctx.closePath();
+                    };
+                    ctx.fillStyle = '#1b2433';
+                    ctx.fillRect(0, 0, W, H);
+                    let y = M;
+                    groups.forEach((g, gi) => {
+                        let h = heights[gi];
+                        // 這一列的底與框
+                        ctx.fillStyle = '#243044';
+                        roundRect(M, y, W - M * 2, h, 6);
+                        ctx.fill();
+                        ctx.strokeStyle = '#34425c';
+                        ctx.lineWidth = 1;
+                        roundRect(M + 0.5, y + 0.5, W - M * 2 - 1, h - 1, 6);
+                        ctx.stroke();
+                        // 等級標籤
+                        ctx.fillStyle = g.tier.bg;
+                        roundRect(M, y, LABEL, h, 6);
+                        ctx.fill();
+                        ctx.fillStyle = g.tier.fg;
+                        ctx.font = 'bold 36px "Microsoft JhengHei", "PingFang TC", sans-serif';
+                        ctx.textAlign = 'center';
+                        ctx.textBaseline = 'middle';
+                        ctx.fillText(g.tier.key, M + LABEL / 2, y + h / 2);
+                        // 封面
+                        g.tiles.forEach((tile, ti) => {
+                            let tx = x0 + (ti % perLine) * (TILE + GAP);
+                            let ty = y + PAD + Math.floor(ti / perLine) * (TILE + GAP);
+                            this.vm_drawTile(ctx, roundRect, tile, tx, ty, TILE);
+                        });
+                        y += h + ROW_GAP;
+                    });
+                    return new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
+                },
+                // 一格封面：置中裁成正方形；沒有封面就畫一個依名稱決定顏色、寫著名稱的色塊
+                vm_drawTile: function (ctx, roundRect, tile, x, y, size) {
+                    ctx.save();
+                    roundRect(x, y, size, size, 4);
+                    ctx.clip();
+                    let img = tile.cover;
+                    if (img && img.naturalWidth > 0) {
+                        let side = Math.min(img.naturalWidth, img.naturalHeight);
+                        let sx = (img.naturalWidth - side) / 2;
+                        let sy = (img.naturalHeight - side) / 2;
+                        ctx.drawImage(img, sx, sy, side, side, x, y, size, size);
+                    } else {
+                        let name = tile.item.title_plain || '';
+                        let hash = 0;
+                        for (let i = 0; i < name.length; i++) {
+                            hash = (hash * 31 + name.charCodeAt(i)) % 360;
+                        }
+                        ctx.fillStyle = 'hsl(' + hash + ', 40%, 32%)';
+                        ctx.fillRect(x, y, size, size);
+                        ctx.fillStyle = '#ffffff';
+                        ctx.font = '12px "Microsoft JhengHei", "PingFang TC", sans-serif';
+                        ctx.textAlign = 'left';
+                        ctx.textBaseline = 'top';
+                        let lines = [], line = '';
+                        for (const ch of name) {
+                            if (ctx.measureText(line + ch).width > size - 10 && line) {
+                                lines.push(line);
+                                line = ch;
+                            } else {
+                                line += ch;
+                            }
+                        }
+                        if (line) {
+                            lines.push(line);
+                        }
+                        let maxLines = Math.floor((size - 10) / 15);
+                        if (lines.length > maxLines) {
+                            lines = lines.slice(0, maxLines);
+                            lines[maxLines - 1] = lines[maxLines - 1].slice(0, -1) + '…';
+                        }
+                        lines.forEach((l, i) => ctx.fillText(l, x + 5, y + 5 + i * 15));
+                    }
+                    ctx.restore();
                 },
                 vm_toast: function (msg) {
                     this.copyMsg = msg;

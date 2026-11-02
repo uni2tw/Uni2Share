@@ -182,6 +182,32 @@ namespace WhatSearch.WebAPIs
             };
         }
 
+        /// <summary>
+        /// 動畫資料夾的封面圖（匯出評分圖用）：資料夾裡的 cover／folder 圖片檔，沒有就取前幾部影片內嵌的封面。
+        /// 只服務可評分的動畫資料夾；需要登入才能看的分享根，沒登入一律 404。沒有封面也是 404（前端改畫名稱色塊）。
+        /// </summary>
+        [HttpGet]
+        [Route("api/foldercover")]
+        public dynamic FolderCover([FromQuery] string id)
+        {
+            string folderPath = string.IsNullOrEmpty(id) ? string.Empty : fimgr.GetPath(id);
+            if (string.IsNullOrEmpty(folderPath) || Directory.Exists(folderPath) == false || ratingService.IsRateable(folderPath) == false)
+            {
+                return NotFound();
+            }
+            if (User.Identity.IsAuthenticated == false && PathUtility.IsProtetedUrl(PathUtility.GetRelativePath(folderPath)))
+            {
+                return NotFound();
+            }
+            WhatSearch.Services.FolderCover cover = Ioc.Get<IFolderCoverService>().Find(folderPath);
+            if (cover == null)
+            {
+                return NotFound();
+            }
+            Response.Headers["Cache-Control"] = "private, max-age=3600";
+            return this.File(cover.Data, cover.MimeType);
+        }
+
         [HttpGet]
         [Route("get/{*pathInfo}")]
         [UserAuthorize]
