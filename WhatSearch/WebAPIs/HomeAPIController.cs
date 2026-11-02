@@ -7,6 +7,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text;
+using System.Threading.Tasks;
 using System.Web;
 using WhatSearch.Core;
 using WhatSearch.Middlewares;
@@ -462,6 +463,104 @@ namespace WhatSearch.WebAPIs
             return new { ok = true, unplayable = mark != null, unplayable_by = mark == null ? null : mark.By, unplayable_time = mark == null ? (long?)null : mark.Time };
         }
 
+        /// <summary>
+        /// 管理者幫動畫資料夾找封面：用名稱到 AniList 搜尋，回傳候選封面（縮圖與大圖網址）。只限可評分的動畫資料夾。
+        /// </summary>
+        [HttpGet]
+        [Route("api/covercandidates")]
+        [UserAuthorize]
+        public async Task<IActionResult> CoverCandidates([FromQuery] string id, [FromQuery] string q)
+        {
+            if (User.IsInRole("Admin") == false)
+            {
+                return StatusCode(403);
+            }
+            string keyword = (q ?? string.Empty).Trim();
+            if (string.IsNullOrEmpty(id) || keyword.Length == 0 || keyword.Length > 100)
+            {
+                return BadRequest("參數錯誤");
+            }
+            string folderPath = fimgr.GetPath(id);
+            if (string.IsNullOrEmpty(folderPath) || Directory.Exists(folderPath) == false)
+            {
+                return NotFound("找不到這個資料夾");
+            }
+            if (ratingService.IsRateable(folderPath) == false)
+            {
+                return BadRequest("這個資料夾不支援更換封面");
+            }
+            try
+            {
+                List<CoverCandidate> list = await Ioc.Get<ICoverSearchService>().SearchAsync(keyword);
+                return Ok(new
+                {
+                    items = list.Select(t => new { title = t.Title, sub_title = t.SubTitle, year = t.Year, format = t.Format, thumb = t.Thumb, image = t.Image })
+                });
+            }
+            catch (InvalidOperationException ex)
+            {
+                return StatusCode(502, ex.Message);
+            }
+        }
+
+        /// <summary>
+        /// 管理者把選定的候選封面存成資料夾裡的 cover.jpg（已有就覆蓋；先寫到系統暫存目錄再取代，失敗不會留下半張圖）。
+        /// 圖片網址只收 AniList 圖片網域，且內容必須是 JPEG。
+        /// </summary>
+        [HttpPost]
+        [Route("api/coverset")]
+        [UserAuthorize]
+        public async Task<IActionResult> SetCover([FromBody] CoverSetInputModel model)
+        {
+            if (User.IsInRole("Admin") == false)
+            {
+                return StatusCode(403);
+            }
+            if (model == null || string.IsNullOrEmpty(model.id) || string.IsNullOrEmpty(model.url))
+            {
+                return BadRequest("參數錯誤");
+            }
+            string folderPath = fimgr.GetPath(model.id);
+            if (string.IsNullOrEmpty(folderPath) || Directory.Exists(folderPath) == false)
+            {
+                return NotFound("找不到這個資料夾");
+            }
+            if (ratingService.IsRateable(folderPath) == false)
+            {
+                return BadRequest("這個資料夾不支援更換封面");
+            }
+            ICoverSearchService coverSearch = Ioc.Get<ICoverSearchService>();
+            if (coverSearch.IsAllowedImageUrl(model.url) == false)
+            {
+                return BadRequest("不支援的圖片來源");
+            }
+            byte[] data;
+            try
+            {
+                data = await coverSearch.DownloadJpegAsync(model.url);
+            }
+            catch (InvalidOperationException ex)
+            {
+                return StatusCode(502, ex.Message);
+            }
+            string target = Path.Combine(folderPath, "cover.jpg");
+            // 暫存檔放在系統暫存目錄：放在分享資料夾裡，檔案監看器會先看到它再被改名，白白建一筆索引
+            string temp = Path.Combine(Path.GetTempPath(), "uni2share-cover-" + Guid.NewGuid().ToString("N") + ".tmp");
+            try
+            {
+                System.IO.File.WriteAllBytes(temp, data);
+                System.IO.File.Move(temp, target, true);
+            }
+            catch (Exception ex)
+            {
+                logger.Error(ex, "寫入 cover.jpg 失敗：" + target);
+                try { System.IO.File.Delete(temp); } catch (Exception) { }
+                return StatusCode(500, "寫入失敗，請確認資料夾可以寫入");
+            }
+            logger.Info("更換封面：" + target + "（" + User.Identity.Name + "）");
+            return Ok(new { ok = true });
+        }
+
         /// <summary>設定動畫的評分（2.5～5、0.5 為一級，0 = 未評分）；id 是資料夾 id，需登入，且該資料夾必須是可評分的</summary>
         [HttpPost]
         [Route("api/rating")]
@@ -698,6 +797,12 @@ namespace WhatSearch.WebAPIs
             int music = new DirectoryInfo(folderPath).EnumerateFiles()
                 .Count(f => f.Attributes.HasFlag(FileAttributes.Hidden) == false && Helper.GetFileDocType(f.Extension) == Helper.ConstStrings.Music);
             return music >= 2 || mainService.GetMultiDiscGroups(folderId) != null;
+        }
+
+        public class CoverSetInputModel
+        {
+            public string id { get; set; }
+            public string url { get; set; }
         }
 
         public class UnplayableInputModel
