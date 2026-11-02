@@ -464,6 +464,28 @@ namespace WhatSearch.WebAPIs
         }
 
         /// <summary>
+        /// 管理者看「目前的封面從哪來」（資料夾裡的圖檔，或影片內嵌）；沒有封面檔時 exists 是 false。只限可評分的動畫資料夾。
+        /// </summary>
+        [HttpGet]
+        [Route("api/coverinfo")]
+        [UserAuthorize]
+        public dynamic CoverInfo([FromQuery] string id)
+        {
+            if (User.IsInRole("Admin") == false)
+            {
+                return StatusCode(403);
+            }
+            string folderPath = string.IsNullOrEmpty(id) ? string.Empty : fimgr.GetPath(id);
+            if (string.IsNullOrEmpty(folderPath) || Directory.Exists(folderPath) == false || ratingService.IsRateable(folderPath) == false)
+            {
+                return NotFound();
+            }
+            WhatSearch.Services.FolderCover cover = Ioc.Get<IFolderCoverService>().Find(folderPath);
+            Response.Headers["Cache-Control"] = "no-store";
+            return new { exists = cover != null, source = cover == null ? null : cover.Source };
+        }
+
+        /// <summary>
         /// 管理者幫動畫資料夾找封面：用名稱到 AniList 搜尋，回傳候選封面（縮圖與大圖網址）。只限可評分的動畫資料夾。
         /// </summary>
         [HttpGet]

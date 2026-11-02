@@ -11,6 +11,8 @@ namespace WhatSearch.Services
     {
         public byte[] Data { get; set; }
         public string MimeType { get; set; }
+        /// <summary>封面從哪來（給人看的說明），例如「資料夾裡的 folder.jpg」、「影片內嵌封面：01.mkv」</summary>
+        public string Source { get; set; }
     }
 
     public interface IFolderCoverService
@@ -55,7 +57,7 @@ namespace WhatSearch.Services
                 byte[] data = ReadImageFile(file);
                 if (data != null && SniffImageMime(data) != null)
                 {
-                    return new FolderCover { Data = data, MimeType = SniffImageMime(data) };
+                    return new FolderCover { Data = data, MimeType = SniffImageMime(data), Source = "資料夾裡的 " + Path.GetFileName(file) };
                 }
             }
 
@@ -105,7 +107,8 @@ namespace WhatSearch.Services
                     if (pic != null)
                     {
                         byte[] data = pic.Data.Data;
-                        return new FolderCover { Data = data, MimeType = SniffImageMime(data) };
+                        string attach = string.IsNullOrEmpty(pic.Filename) ? string.Empty : "，附件 " + pic.Filename;
+                        return new FolderCover { Data = data, MimeType = SniffImageMime(data), Source = "影片內嵌封面：" + Path.GetFileName(videoFile) + attach };
                     }
                 }
             }
@@ -121,7 +124,7 @@ namespace WhatSearch.Services
                 byte[] data = MatroskaSubtitleReader.ReadCoverAttachment(videoFile, out mime);
                 if (data != null && SniffImageMime(data) != null)
                 {
-                    return new FolderCover { Data = data, MimeType = SniffImageMime(data) };
+                    return new FolderCover { Data = data, MimeType = SniffImageMime(data), Source = "影片內嵌封面（MKV 附件）：" + Path.GetFileName(videoFile) };
                 }
             }
             return null;
