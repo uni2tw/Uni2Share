@@ -2145,7 +2145,7 @@
                 },
                 // 取資料夾封面（伺服器找 cover／folder 圖片檔，或影片內嵌的封面）；沒有封面或載入失敗回傳 null
                 vm_loadFolderCover: function (id) {
-                    return fetch('/api/foldercover?id=' + encodeURIComponent(id))
+                    return fetch('/api/foldercover?id=' + encodeURIComponent(id), { cache: 'no-store' })
                         .then(res => res.ok ? res.blob() : null)
                         .then(blob => {
                             if (!blob) {
@@ -2170,7 +2170,7 @@
                         { key: 'D', bg: '#4a9bff', fg: '#ffffff' },
                         { key: 'F', bg: '#9aa3b2', fg: '#ffffff' }
                     ];
-                    const W = 985, M = 12, LABEL = 104, TILE = 90, GAP = 8, PAD = 8, SCALE = 2, MIN_ROW = 106, ROW_GAP = 8;
+                    const W = 985, M = 12, LABEL = 104, TILE = 90, TILE_H = 135, GAP = 8, PAD = 8, SCALE = 2, MIN_ROW = 106, ROW_GAP = 8;
                     let x0 = M + LABEL + PAD;
                     let perLine = Math.max(1, Math.floor((W - M - PAD - x0 + GAP) / (TILE + GAP)));
                     let groups = TIERS.map(t => ({ tier: t, tiles: [] }));
@@ -2180,7 +2180,7 @@
                     });
                     let heights = groups.map(g => {
                         let lines = Math.max(1, Math.ceil(g.tiles.length / perLine));
-                        return Math.max(MIN_ROW, PAD * 2 + lines * TILE + (lines - 1) * GAP);
+                        return Math.max(MIN_ROW, PAD * 2 + lines * TILE_H + (lines - 1) * GAP);
                     });
                     let H = M * 2 + heights.reduce((a, b) => a + b, 0) + ROW_GAP * (groups.length - 1);
                     let canvas = document.createElement('canvas');
@@ -2222,24 +2222,47 @@
                         // 封面
                         g.tiles.forEach((tile, ti) => {
                             let tx = x0 + (ti % perLine) * (TILE + GAP);
-                            let ty = y + PAD + Math.floor(ti / perLine) * (TILE + GAP);
-                            this.vm_drawTile(ctx, roundRect, tile, tx, ty, TILE);
+                            let ty = y + PAD + Math.floor(ti / perLine) * (TILE_H + GAP);
+                            this.vm_drawTile(ctx, roundRect, tile, tx, ty, TILE, TILE_H);
                         });
                         y += h + ROW_GAP;
                     });
                     return new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
                 },
-                // 一格封面：置中裁成正方形；沒有封面就畫一個依名稱決定顏色、寫著名稱的色塊
-                vm_drawTile: function (ctx, roundRect, tile, x, y, size) {
+                // 一格封面（2:3 直式）：直式海報滿版置中裁切；橫式或接近正方形的圖不裁，
+                // 完整縮放放在中間，上下用同一張圖放大模糊當底；沒有封面就畫一個依名稱決定顏色、寫著名稱的色塊
+                vm_drawTile: function (ctx, roundRect, tile, x, y, size, height) {
                     ctx.save();
-                    roundRect(x, y, size, size, 4);
+                    roundRect(x, y, size, height, 4);
                     ctx.clip();
                     let img = tile.cover;
                     if (img && img.naturalWidth > 0) {
-                        let side = Math.min(img.naturalWidth, img.naturalHeight);
-                        let sx = (img.naturalWidth - side) / 2;
-                        let sy = (img.naturalHeight - side) / 2;
-                        ctx.drawImage(img, sx, sy, side, side, x, y, size, size);
+                        let iw = img.naturalWidth, ih = img.naturalHeight;
+                        let boxRatio = size / height;
+                        // 只比格子稍寬的直式圖（例如 0.7）裁一點就好；明顯更寬的才走不裁切的做法
+                        if (iw / ih <= boxRatio * 1.25) {
+                            let sw = iw, sh = ih;
+                            if (iw / ih > boxRatio) {
+                                sw = ih * boxRatio;
+                            } else {
+                                sh = iw / boxRatio;
+                            }
+                            ctx.drawImage(img, (iw - sw) / 2, (ih - sh) / 2, sw, sh, x, y, size, height);
+                        } else {
+                            // 縮到很小再放大，等於模糊（不用 ctx.filter，Safari 不支援）
+                            let small = document.createElement('canvas');
+                            small.width = 9;
+                            small.height = 14;
+                            let sctx = small.getContext('2d');
+                            let bw = ih * boxRatio;
+                            sctx.drawImage(img, (iw - bw) / 2, 0, bw, ih, 0, 0, small.width, small.height);
+                            ctx.imageSmoothingEnabled = true;
+                            ctx.drawImage(small, x, y, size, height);
+                            ctx.fillStyle = 'rgba(0, 0, 0, 0.35)';
+                            ctx.fillRect(x, y, size, height);
+                            let dh = ih * size / iw;
+                            ctx.drawImage(img, x, y + (height - dh) / 2, size, dh);
+                        }
                     } else {
                         let name = tile.item.title_plain || '';
                         let hash = 0;
@@ -2247,7 +2270,7 @@
                             hash = (hash * 31 + name.charCodeAt(i)) % 360;
                         }
                         ctx.fillStyle = 'hsl(' + hash + ', 40%, 32%)';
-                        ctx.fillRect(x, y, size, size);
+                        ctx.fillRect(x, y, size, height);
                         ctx.fillStyle = '#ffffff';
                         ctx.font = '12px "Microsoft JhengHei", "PingFang TC", sans-serif';
                         ctx.textAlign = 'left';
@@ -2264,7 +2287,7 @@
                         if (line) {
                             lines.push(line);
                         }
-                        let maxLines = Math.floor((size - 10) / 15);
+                        let maxLines = Math.floor((height - 10) / 15);
                         if (lines.length > maxLines) {
                             lines = lines.slice(0, maxLines);
                             lines[maxLines - 1] = lines[maxLines - 1].slice(0, -1) + '…';
