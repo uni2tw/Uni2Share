@@ -65,6 +65,10 @@ api.setUnplayable = function(id, value) {
     return axios.post('/api/unplayable', { id: id, value: value });
 }
 
+api.coverInfo = function(id) {
+    return axios.get('/api/coverinfo', { params: { id: id } });
+}
+
 api.coverCandidates = function(id, q) {
     return axios.get('/api/covercandidates', { params: { id: id, q: q } });
 }

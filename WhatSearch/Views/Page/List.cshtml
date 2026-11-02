@@ -820,7 +820,7 @@
             v-on:input="vm_seekInput" v-on:change="vm_seek" style="width:100%;" />
     </div>
 
-    <div class="lightbox-overlay" v-if="nowPlayingVideo.id" v-on:click.self="vm_closeVideo()">
+    <div class="lightbox-overlay" v-if="nowPlayingVideo.id" v-on:mousedown="vm_overlayDown($event)" v-on:click.self="vm_overlayClick() && vm_closeVideo()">
         <div class="lightbox-overlay-content">
             <div style="display:flex; justify-content:space-between; align-items:center; color:#fff; padding:6px 2px;">
                 <div style="overflow:hidden; white-space:nowrap; text-overflow:ellipsis; margin-right:10px;">
@@ -888,7 +888,7 @@
         </div>
     </div>
 
-    <div class="lightbox-overlay" v-if="previewImage.id" v-on:click.self="vm_closeImagePreview()">
+    <div class="lightbox-overlay" v-if="previewImage.id" v-on:mousedown="vm_overlayDown($event)" v-on:click.self="vm_overlayClick() && vm_closeImagePreview()">
         <button type="button" class="btn btn-outline-light lightbox-nav-btn" style="left:10px"
             v-if="previewImage.hasPrev" v-on:click="vm_previewStep(-1)">
             <i class="fa fa-chevron-left"></i>
@@ -908,7 +908,7 @@
         </button>
     </div>
 
-    <div class="lightbox-overlay" v-if="previewText.id" v-on:click.self="vm_closeTextPreview()">
+    <div class="lightbox-overlay" v-if="previewText.id" v-on:mousedown="vm_overlayDown($event)" v-on:click.self="vm_overlayClick() && vm_closeTextPreview()">
         <div class="lightbox-overlay-content" style="background:#fff; color:#222; border-radius:8px; max-height:85vh; overflow:auto; padding:16px 20px;">
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
                 <div style="font-weight:bold; font-size:1.1rem; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; margin-right:10px;">{{ previewText.title }}</div>
@@ -922,7 +922,7 @@
     </div>
 
     <div v-if="copyMsg" style="position:fixed; left:50%; bottom:90px; transform:translateX(-50%); background:rgba(0,0,0,0.85); color:#fff; padding:8px 16px; border-radius:20px; font-size:14px; z-index:3000; pointer-events:none;">{{ copyMsg }}</div>
-    <div v-if="ratingPicker" class="rating-overlay" v-on:click.self="vm_closeRatingPicker()">
+    <div v-if="ratingPicker" class="rating-overlay" v-on:mousedown="vm_overlayDown($event)" v-on:click.self="vm_overlayClick() && vm_closeRatingPicker()">
         <div class="rating-sheet">
             <div style="font-weight:bold; font-size:16px; word-break:break-all;">{{ ratingPicker.name }}</div>
             <div style="display:flex; align-items:center; margin:2px 0 12px; font-size:15px;">
@@ -949,7 +949,7 @@
             <div class="rating-keys">Enter 確定 · Esc 取消</div>
         </div>
     </div>
-    <div class="lightbox-overlay" v-if="copyDialog" v-on:click.self="copyDialog = null">
+    <div class="lightbox-overlay" v-if="copyDialog" v-on:mousedown="vm_overlayDown($event)" v-on:click.self="vm_overlayClick() && (copyDialog = null)">
         <div class="lightbox-overlay-content" style="background:#fff; color:#222; border-radius:8px; padding:14px 16px;">
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
                 <div style="font-weight:bold;">無法自動複製，請手動複製</div>
@@ -960,7 +960,7 @@
         </div>
     </div>
 
-    <div class="lightbox-overlay" v-if="tierPreview" v-on:click.self="vm_closeTierPreview()">
+    <div class="lightbox-overlay" v-if="tierPreview" v-on:mousedown="vm_overlayDown($event)" v-on:click.self="vm_overlayClick() && vm_closeTierPreview()">
         <div class="lightbox-overlay-content" style="background:#fff; color:#222; border-radius:8px; padding:12px 14px; max-height:94vh; overflow:auto;">
             <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; margin-bottom:8px;">
                 <div style="font-weight:bold;">評分圖（{{ tierPreview.count }} 部）</div>
@@ -974,11 +974,21 @@
         </div>
     </div>
 
-    <div class="lightbox-overlay" v-if="coverEdit" v-on:click.self="vm_closeCoverEdit()">
+    <div class="lightbox-overlay" v-if="coverEdit" v-on:mousedown="vm_overlayDown($event)" v-on:click.self="vm_overlayClick() && vm_closeCoverEdit()">
         <div class="lightbox-overlay-content" style="background:#fff; color:#222; border-radius:8px; padding:12px 14px; max-height:94vh; overflow:auto; width:min(560px, 96vw);">
             <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; margin-bottom:8px;">
                 <div style="font-weight:bold;">更換封面</div>
                 <button type="button" class="btn btn-sm btn-outline-secondary" v-on:click="vm_closeCoverEdit()"><i class="fa fa-times"></i></button>
+            </div>
+            <div style="display:flex; gap:10px; align-items:center; margin-bottom:10px; padding:8px; background:#f5f6f8; border-radius:6px;">
+                <img v-if="coverEdit.current" :src="coverEdit.current" v-on:load="coverEdit.currentSize = $event.target.naturalWidth + '×' + $event.target.naturalHeight" style="width:56px; aspect-ratio:2/3; object-fit:cover; border-radius:4px; flex:0 0 auto; background:#ddd;" />
+                <div v-else style="width:56px; aspect-ratio:2/3; border:1px dashed #aaa; border-radius:4px; flex:0 0 auto; display:flex; align-items:center; justify-content:center; color:#999; font-size:11px; text-align:center;">沒有</div>
+                <div style="font-size:13px; min-width:0;">
+                    <div style="font-weight:bold;">目前的封面</div>
+                    <div v-if="coverEdit.currentLoading" style="color:#888;">讀取中…</div>
+                    <div v-else-if="coverEdit.current" style="color:#555; word-break:break-all;">{{ coverEdit.currentSource }}<span v-if="coverEdit.currentSize" style="color:#888;">（{{ coverEdit.currentSize }}）</span></div>
+                    <div v-else style="color:#888;">沒有封面檔（資料夾裡沒有 cover／folder 圖片，影片也沒有內嵌封面）。頁面上若有圖，是從影片擷取的畫面。</div>
+                </div>
             </div>
             <form style="display:flex; gap:6px;" v-on:submit.prevent="vm_searchCover()">
                 <input type="text" class="form-control form-control-sm" v-model="coverEdit.keyword" maxlength="100" placeholder="作品名稱（中文查不到時改日文或英文）" />
@@ -1132,6 +1142,7 @@
                     tierProgress: '',
                     tierPreview: null,
                     coverEdit: null,
+                    overlayDownOnSelf: false,
                     favAlbumMap: {},
                     favTrackMap: {},
                     favView: false,
@@ -2336,8 +2347,27 @@
                     if (!this.canEditCover) {
                         return;
                     }
-                    this.coverEdit = { folderId: this.currentRating.id, keyword: this.currentRating.name || '', loading: false, saving: false, searched: false, error: '', items: [] };
+                    let st = { folderId: this.currentRating.id, keyword: this.currentRating.name || '', loading: false, saving: false, searched: false, error: '', items: [],
+                        current: '', currentSource: '', currentSize: '', currentLoading: true };
+                    this.coverEdit = st;
+                    api.coverInfo(st.folderId).then(res => {
+                        if (res.data.exists) {
+                            st.currentSource = res.data.source;
+                            st.current = '/api/foldercover?id=' + encodeURIComponent(st.folderId) + '&t=' + Date.now();
+                        }
+                    }).catch(() => { }).finally(() => {
+                        st.currentLoading = false;
+                    });
                     this.vm_searchCover();
+                },
+                // 遮罩點一下才關閉：按下和放開都要在遮罩本身；在對話框裡按下（選字、拖曳）再拖到外面放開，不會關掉
+                vm_overlayDown: function (e) {
+                    this.overlayDownOnSelf = e.target === e.currentTarget;
+                },
+                vm_overlayClick: function () {
+                    let ok = this.overlayDownOnSelf;
+                    this.overlayDownOnSelf = false;
+                    return ok;
                 },
                 vm_closeCoverEdit: function () {
                     if (this.coverEdit && this.coverEdit.saving) {
