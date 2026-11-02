@@ -66,6 +66,11 @@
                     vm_load: function () {
                         var self = this;
                         axios.get('/admin/monitor/data').then(function (res) {
+                            // 登入失效時伺服器會轉去登入頁，拿到的是 HTML 不是資料，不能當成資料用
+                            if (!res.data || !Array.isArray(res.data.sessions)) {
+                                self.failed = true;
+                                return;
+                            }
                             self.data = res.data;
                             self.failed = false;
                             self.loaded = true;

@@ -14,6 +14,13 @@ namespace WhatSearch.Services.Interfaces
         bool UpdateMemberRole(string name, MemberRole role);
         /// <summary>管理者重設密碼：存成雜湊；不會更換存取權杖（對方已登入的裝置不受影響）。找不到會員回傳 false</summary>
         bool ResetPassword(string name, string newPassword);
+        /// <summary>使用者自己改顯示名稱（去掉前後空白，1～20 個字，不能含控制字元）；失敗時 message 是原因</summary>
+        bool UpdateDisplayName(string name, string displayName, out string displayNameSaved, out string message);
+        /// <summary>
+        /// 使用者自己改密碼：要先通過舊密碼驗證，成功後換新的存取權杖（其他裝置的登入會失效），
+        /// 並發新的 cookie 給目前這台裝置（所以這台不會被登出）。
+        /// </summary>
+        bool ChangePassword(HttpResponse response, string name, string oldPassword, string newPassword, int cookieDays, out string message);
         void ForceLogin(HttpResponse response, string accessToken, int cookieDays);
         Member GetMember(string name);
         List<Member> GetMembers();

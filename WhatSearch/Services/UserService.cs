@@ -1,5 +1,6 @@
 ﻿using Microsoft.AspNetCore.Http;
 using System;
+using System.Globalization;
 using System.Security.Claims;
 using WhatSearch.Core;
 using WhatSearch.Services.Interfaces;
@@ -86,6 +87,111 @@ namespace WhatSearch.Services
             });
         }
 
+        public const int DisplayNameMaxLength = 20;
+
+        /// <summary>去掉前後空白後要有內容、最多 DisplayNameMaxLength 個字（emoji 之類算 1 個字），不能含控制字元、換行、不可見的格式字元</summary>
+        public static bool TryNormalizeDisplayName(string input, out string result, out string message)
+        {
+            result = (input ?? string.Empty).Trim();
+            message = string.Empty;
+            if (result.Length == 0)
+            {
+                message = "顯示名稱不可空白";
+                return false;
+            }
+            foreach (char c in result)
+            {
+                UnicodeCategory category = char.GetUnicodeCategory(c);
+                bool invisible = category == UnicodeCategory.Control || category == UnicodeCategory.LineSeparator ||
+                    category == UnicodeCategory.ParagraphSeparator ||
+                    (category == UnicodeCategory.Format && c != '\u200D');   // 零寬連接符號（ZWJ）是組合 emoji 用的，放行
+                if (invisible)
+                {
+                    message = "顯示名稱含有不能使用的字元";
+                    return false;
+                }
+            }
+            if (new StringInfo(result).LengthInTextElements > DisplayNameMaxLength)
+            {
+                message = string.Format("顯示名稱最多 {0} 個字", DisplayNameMaxLength);
+                return false;
+            }
+            return true;
+        }
+
+        public bool UpdateDisplayName(string name, string displayName, out string displayNameSaved, out string message)
+        {
+            displayNameSaved = null;
+            string normalized;
+            if (TryNormalizeDisplayName(displayName, out normalized, out message) == false)
+            {
+                return false;
+            }
+            if (mp.Update(name, m => m.DisplayName = normalized) == false)
+            {
+                message = "找不到這個會員";
+                return false;
+            }
+            displayNameSaved = normalized;
+            message = "顯示名稱已更新";
+            return true;
+        }
+
+        public bool ChangePassword(HttpResponse response, string name, string oldPassword, string newPassword, int cookieDays, out string message)
+        {
+            message = string.Empty;
+            Member mem = mp.GetMember(name);
+            if (mem == null || string.IsNullOrEmpty(mem.PasswordHash))
+            {
+                message = "找不到這個會員";
+                return false;
+            }
+            if (string.IsNullOrEmpty(oldPassword))
+            {
+                message = "請輸入目前的密碼";
+                return false;
+            }
+            bool oldOk = mem.PasswordFormat == PasswordFormat.PlainText
+                ? mem.PasswordHash == oldPassword
+                : PasswordHasher.Verify(oldPassword, mem.PasswordHash);
+            if (oldOk == false)
+            {
+                message = "目前的密碼不正確";
+                return false;
+            }
+            if (string.IsNullOrWhiteSpace(newPassword))
+            {
+                message = "新密碼不可空白";
+                return false;
+            }
+            if (newPassword.Length > 128)
+            {
+                message = "新密碼太長（最多 128 個字元）";
+                return false;
+            }
+            if (newPassword == oldPassword)
+            {
+                message = "新密碼不能和目前的密碼相同";
+                return false;
+            }
+            string hashed = PasswordHasher.Hash(newPassword);
+            string newToken = Guid.NewGuid().ToString("N");
+            bool updated = mp.Update(name, m =>
+            {
+                m.PasswordHash = hashed;
+                m.PasswordFormat = PasswordFormat.Hashed;
+                m.AccessToken = newToken;
+            });
+            if (updated == false)
+            {
+                message = "找不到這個會員";
+                return false;
+            }
+            ForceLogin(response, newToken, cookieDays);
+            message = "密碼已變更，其他裝置已登出";
+            return true;
+        }
+
         public bool UpdateMemberRole(string name, MemberRole role)
         {
             return mp.Update(name, m =>
@@ -128,11 +234,17 @@ namespace WhatSearch.Services
                 message = "此帳號已被使用";
                 return false;
             }
+            string normalizedDisplayName = name;
+            if (string.IsNullOrWhiteSpace(displayName) == false &&
+                TryNormalizeDisplayName(displayName, out normalizedDisplayName, out message) == false)
+            {
+                return false;
+            }
             bool isFirstMember = mp.GetMembers().Count == 0;
             Member mem = new Member
             {
                 Name = name,
-                DisplayName = string.IsNullOrWhiteSpace(displayName) ? name : displayName,
+                DisplayName = normalizedDisplayName,
                 PasswordHash = PasswordHasher.Hash(password),
                 PasswordFormat = PasswordFormat.Hashed,
                 Status = isFirstMember ? MemberStatus.Active : MemberStatus.Invalice,

@@ -243,6 +243,82 @@ namespace WhatSearch.Controllers
             };
         }
 
+        /// <summary>我的帳號：看自己的資料、改顯示名稱、改密碼（任何已登入的會員都可以用，未登入轉去登入）</summary>
+        [Route("account")]
+        public IActionResult AccountPage()
+        {
+            if (User.Identity.IsAuthenticated == false)
+            {
+                return Redirect("/page/login?returnUrl=" + Uri.EscapeDataString("/account"));
+            }
+            return View("Account");
+        }
+
+        [HttpGet]
+        [Route("account/data")]
+        public dynamic AccountData()
+        {
+            Member mem = GetCurrentMember();
+            if (mem == null)
+            {
+                return StatusCode(401);
+            }
+            return new
+            {
+                name = mem.Name,
+                display = mem.DisplayName,
+                admin = mem.IsAdmin,
+                create = mem.CreateTime,
+                access = mem.LastAccessTime,
+                displayNameMaxLength = UserService.DisplayNameMaxLength
+            };
+        }
+
+        [HttpPost]
+        [Route("account/displayName")]
+        public dynamic AccountUpdateDisplayName([FromBody] DisplayNameModel model)
+        {
+            Member mem = GetCurrentMember();
+            if (mem == null)
+            {
+                return StatusCode(401);
+            }
+            string saved, message;
+            bool success = Ioc.Get<IUserService>().UpdateDisplayName(mem.Name, model?.displayName, out saved, out message);
+            return new { success, message, display = saved };
+        }
+
+        [HttpPost]
+        [Route("account/password")]
+        public dynamic AccountChangePassword([FromBody] ChangePasswordModel model)
+        {
+            Member mem = GetCurrentMember();
+            if (mem == null)
+            {
+                return StatusCode(401);
+            }
+            string message;
+            bool success = Ioc.Get<IUserService>().ChangePassword(Response, mem.Name, model?.oldPassword, model?.newPassword,
+                config.Login.CookieDays, out message);
+            return new { success, message };
+        }
+
+        Member GetCurrentMember()
+        {
+            return User.Identity.IsAuthenticated ? Ioc.Get<IUserService>().GetMember(User.Identity.Name) : null;
+        }
+
+        public class DisplayNameModel
+        {
+            public string displayName { get; set; }
+        }
+
+        public class ChangePasswordModel
+        {
+            public string oldPassword { get; set; }
+            public string newPassword { get; set; }
+        }
+
         public class ConvertEnqueueModel
         {
             public List<string> ids { get; set; }
