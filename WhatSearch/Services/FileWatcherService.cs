@@ -19,21 +19,43 @@ namespace WhatSearch
                 {
                     FileSystemWatcher watcher = new FileSystemWatcher(shareFolder.Path);
                     watcher.IncludeSubdirectories = true;
+                    // 事件在背景執行緒觸發，沒接住的例外會讓整個程式結束（例如新檔案在建索引前就被改名或刪除）
                     watcher.Renamed += delegate (object sender, RenamedEventArgs e)
                     {
-                        seekService.RemoveFolderOrFile(e.OldFullPath);
-                        seekService.AppendFolderOrFile(e.FullPath);
-                        logger.Info("{0}: {1}, {2}", e.ChangeType, e.Name, e.FullPath);
+                        try
+                        {
+                            seekService.RemoveFolderOrFile(e.OldFullPath);
+                            seekService.AppendFolderOrFile(e.FullPath);
+                            logger.Info("{0}: {1}, {2}", e.ChangeType, e.Name, e.FullPath);
+                        }
+                        catch (Exception ex)
+                        {
+                            logger.Warn(ex, "處理檔案異動失敗：{0}", e.FullPath);
+                        }
                     };
                     watcher.Created += delegate (object sender, FileSystemEventArgs e)
                     {
-                        seekService.AppendFolderOrFile(e.FullPath);
-                        logger.Info("{0}: {1}", e.ChangeType, e.FullPath);
+                        try
+                        {
+                            seekService.AppendFolderOrFile(e.FullPath);
+                            logger.Info("{0}: {1}", e.ChangeType, e.FullPath);
+                        }
+                        catch (Exception ex)
+                        {
+                            logger.Warn(ex, "處理檔案異動失敗：{0}", e.FullPath);
+                        }
                     };
                     watcher.Deleted += delegate (object sender, FileSystemEventArgs e)
                     {
-                        seekService.RemoveFolderOrFile(e.FullPath);
-                        logger.Info("{0}: {1}", e.ChangeType, e.FullPath);
+                        try
+                        {
+                            seekService.RemoveFolderOrFile(e.FullPath);
+                            logger.Info("{0}: {1}", e.ChangeType, e.FullPath);
+                        }
+                        catch (Exception ex)
+                        {
+                            logger.Warn(ex, "處理檔案異動失敗：{0}", e.FullPath);
+                        }
                     };
                     watcher.EnableRaisingEvents = true;
                     watchers.Add(watcher);

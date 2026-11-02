@@ -65,6 +65,14 @@ api.setUnplayable = function(id, value) {
     return axios.post('/api/unplayable', { id: id, value: value });
 }
 
+api.coverCandidates = function(id, q) {
+    return axios.get('/api/covercandidates', { params: { id: id, q: q } });
+}
+
+api.setCover = function(id, url) {
+    return axios.post('/api/coverset', { id: id, url: url });
+}
+
 api.transcodeStatus = function(ids, first) {
     return axios.post('/api/transcode/status', { ids: ids, first: first || null });
 }

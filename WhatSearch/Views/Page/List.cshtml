@@ -556,6 +556,9 @@
             <button type="button" class="btn btn-sm btn-outline-secondary" v-on:click="vm_copyCurrentRating()">
                 <i class="fa fa-copy"></i> 複製
             </button>
+            <button v-if="canEditCover" type="button" class="btn btn-sm btn-outline-secondary" title="搜尋並更換封面" v-on:click="vm_openCoverEdit()">
+                <i class="fa fa-image"></i> 改圖
+            </button>
         </div>
         <div v-if="currentRating && currentRating.kind === 'anime' && currentRating.unplayable" style="padding:6px 5px 0; display:flex; align-items:center; flex-wrap:wrap; gap:6px 10px;">
             <span class="unplay-tag" style="margin-left:0;"><i class="fa fa-ban"></i> 無法播放</span>
@@ -576,8 +579,10 @@
         </div>
         <div v-if="videoGridVisible" style="padding:10px 5px;">
             <div style="display:flex; gap:14px; align-items:flex-start;">
-                <div v-if="videoCoverUrl" style="flex:0 0 auto; width:140px;">
-                    <img :src="videoCoverUrl" style="width:100%; border-radius:6px; display:block;" />
+                <div v-if="videoCoverUrl || canEditCover" style="flex:0 0 auto; width:140px; position:relative;">
+                    <img v-if="videoCoverUrl" :src="videoCoverUrl" style="width:100%; border-radius:6px; display:block;" />
+                    <div v-else style="width:100%; aspect-ratio:2/3; border:1px dashed #aaa; border-radius:6px; display:flex; align-items:center; justify-content:center; color:#999; font-size:13px;">沒有封面</div>
+                    <button v-if="canEditCover" type="button" class="btn btn-sm btn-dark" style="position:absolute; right:6px; bottom:6px; opacity:0.85; padding:1px 8px;" title="搜尋並更換封面" v-on:click="vm_openCoverEdit()"><i class="fa fa-image"></i> 改圖</button>
                 </div>
                 <div style="flex:1; min-width:0;">
                     <div style="font-size:1.2rem; font-weight:bold; word-break:break-all;">{{ videoFolder.title }}</div>
@@ -597,8 +602,9 @@
             </div>
         </div>
         <div v-if="singleVideo && !videoFolder && videoCoverUrl" style="padding:10px 5px; display:flex; gap:14px; align-items:flex-start;">
-            <div style="flex:0 0 auto; width:140px; cursor:pointer;" v-on:click="vm_changeFolder(singleVideo)">
+            <div style="flex:0 0 auto; width:140px; cursor:pointer; position:relative;" v-on:click="vm_changeFolder(singleVideo)">
                 <img :src="videoCoverUrl" style="width:100%; border-radius:6px; display:block;" />
+                <button v-if="canEditCover" type="button" class="btn btn-sm btn-dark" style="position:absolute; right:6px; bottom:6px; opacity:0.85; padding:1px 8px;" title="搜尋並更換封面" v-on:click.stop="vm_openCoverEdit()"><i class="fa fa-image"></i> 改圖</button>
             </div>
             <div style="flex:1; min-width:0;">
                 <div style="font-size:1.1rem; font-weight:bold; word-break:break-all;">{{ singleVideo.title }}</div>
@@ -968,6 +974,31 @@
         </div>
     </div>
 
+    <div class="lightbox-overlay" v-if="coverEdit" v-on:click.self="vm_closeCoverEdit()">
+        <div class="lightbox-overlay-content" style="background:#fff; color:#222; border-radius:8px; padding:12px 14px; max-height:94vh; overflow:auto; width:min(560px, 96vw);">
+            <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; margin-bottom:8px;">
+                <div style="font-weight:bold;">更換封面</div>
+                <button type="button" class="btn btn-sm btn-outline-secondary" v-on:click="vm_closeCoverEdit()"><i class="fa fa-times"></i></button>
+            </div>
+            <form style="display:flex; gap:6px;" v-on:submit.prevent="vm_searchCover()">
+                <input type="text" class="form-control form-control-sm" v-model="coverEdit.keyword" maxlength="100" placeholder="作品名稱（中文查不到時改日文或英文）" />
+                <button type="submit" class="btn btn-sm btn-primary" style="white-space:nowrap;" :disabled="coverEdit.loading || coverEdit.saving"><i class="fa fa-search"></i> 搜尋</button>
+            </form>
+            <div style="font-size:12px; color:#888; margin:6px 0;">從 AniList 找候選圖。選一張就會存成這個資料夾的 cover.jpg（已經有的會被覆蓋）。</div>
+            <div v-if="coverEdit.loading" style="color:#888; padding:14px 0;">搜尋中…</div>
+            <div v-else-if="coverEdit.error" style="color:#dc3545; padding:8px 0; font-size:14px;">{{ coverEdit.error }}</div>
+            <div v-else-if="coverEdit.searched && coverEdit.items.length === 0" style="color:#888; padding:8px 0; font-size:14px;">找不到，換個關鍵字試試</div>
+            <div v-else style="display:grid; grid-template-columns:repeat(auto-fill, minmax(104px, 1fr)); gap:10px;">
+                <div v-for="(c, i) in coverEdit.items" :key="i" style="cursor:pointer; text-align:center;" v-on:click="vm_applyCover(c)">
+                    <img :src="c.thumb" referrerpolicy="no-referrer" loading="lazy" style="width:100%; aspect-ratio:2/3; object-fit:cover; border-radius:6px; display:block; background:#eee;" />
+                    <div style="font-size:12px; line-height:1.3; margin-top:3px; word-break:break-all;">{{ c.title }}</div>
+                    <div style="font-size:11px; color:#888;">{{ c.year || '' }} {{ c.format || '' }}</div>
+                </div>
+            </div>
+            <div v-if="coverEdit.saving" style="color:#888; padding:10px 0; font-size:14px;"><i class="fa fa-spinner fa-spin"></i> 儲存中…</div>
+        </div>
+    </div>
+
     <div id="app2"></div>
 
 
@@ -1100,6 +1131,7 @@
                     tierBusy: false,
                     tierProgress: '',
                     tierPreview: null,
+                    coverEdit: null,
                     favAlbumMap: {},
                     favTrackMap: {},
                     favView: false,
@@ -1495,6 +1527,10 @@
                 },
                 videoFolderKey: function() {
                     return this.coverVideoItem ? this.coverVideoItem.id : '';
+                },
+                // 管理者在動畫資料夾裡可以更換封面
+                canEditCover: function() {
+                    return this.isAdmin && !!this.currentRating && this.currentRating.kind === 'anime';
                 },
                 // 目前瀏覽的資料夾 id（麵包屑最後一層）；專輯的「收藏」就是收藏這個資料夾
                 currentFolderId: function() {
@@ -2295,6 +2331,59 @@
                         lines.forEach((l, i) => ctx.fillText(l, x + 5, y + 5 + i * 15));
                     }
                     ctx.restore();
+                },
+                vm_openCoverEdit: function () {
+                    if (!this.canEditCover) {
+                        return;
+                    }
+                    this.coverEdit = { folderId: this.currentRating.id, keyword: this.currentRating.name || '', loading: false, saving: false, searched: false, error: '', items: [] };
+                    this.vm_searchCover();
+                },
+                vm_closeCoverEdit: function () {
+                    if (this.coverEdit && this.coverEdit.saving) {
+                        return;
+                    }
+                    this.coverEdit = null;
+                },
+                vm_searchCover: function () {
+                    let st = this.coverEdit;
+                    if (!st || st.loading || st.saving) {
+                        return;
+                    }
+                    let keyword = st.keyword.trim();
+                    if (!keyword) {
+                        st.error = '請輸入作品名稱';
+                        return;
+                    }
+                    st.loading = true;
+                    st.error = '';
+                    api.coverCandidates(st.folderId, keyword).then(res => {
+                        st.items = res.data.items || [];
+                        st.searched = true;
+                    }).catch(err => {
+                        st.items = [];
+                        st.error = (err.response && typeof err.response.data === 'string' && err.response.data) || '搜尋失敗，請稍後再試';
+                    }).finally(() => {
+                        st.loading = false;
+                    });
+                },
+                vm_applyCover: function (candidate) {
+                    let st = this.coverEdit;
+                    if (!st || st.loading || st.saving) {
+                        return;
+                    }
+                    st.saving = true;
+                    st.error = '';
+                    api.setCover(st.folderId, candidate.image).then(() => {
+                        st.saving = false;
+                        // 帶時間參數避免瀏覽器用舊的封面；這個網址伺服器會直接讀資料夾裡現在的 cover
+                        this.videoCoverUrl = '/api/foldercover?id=' + encodeURIComponent(st.folderId) + '&t=' + Date.now();
+                        this.coverEdit = null;
+                        this.vm_toast('已更換封面');
+                    }).catch(err => {
+                        st.saving = false;
+                        st.error = (err.response && typeof err.response.data === 'string' && err.response.data) || '儲存失敗，請稍後再試';
+                    });
                 },
                 vm_toast: function (msg) {
                     this.copyMsg = msg;
