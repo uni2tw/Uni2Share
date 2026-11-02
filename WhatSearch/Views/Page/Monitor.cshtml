@@ -126,31 +126,31 @@
         <div v-else>
             <div class="row g-2" style="margin-bottom:14px;">
                 <div class="col-6 col-md-3">
-                    <div class="card"><div class="card-body" style="padding:10px 14px;">
+                    <div class="card" style="height:100%;"><div class="card-body" style="padding:10px 14px;">
                         <div style="font-size:12px; color:#666;">正在播放</div>
                         <div style="font-size:24px; font-weight:500;">{{ activeSessions.length }} <span style="font-size:12px; color:#888; font-weight:400;">個</span></div>
-                        <div v-if="recentSessions.length" style="font-size:12px; color:#888;">另有 {{ recentSessions.length }} 個剛結束</div>
+                        <div style="font-size:12px; color:#888;">{{ recentSessions.length ? '另有 ' + recentSessions.length + ' 個剛結束' : '連線中的播放' }}</div>
                     </div></div>
                 </div>
                 <div class="col-6 col-md-3">
-                    <div class="card"><div class="card-body" style="padding:10px 14px;">
+                    <div class="card" style="height:100%;"><div class="card-body" style="padding:10px 14px;">
                         <div style="font-size:12px; color:#666;">目前輸出</div>
                         <div style="font-size:24px; font-weight:500;">{{ data.mbps.toFixed(1) }} <span style="font-size:12px; color:#888; font-weight:400;">Mbps</span></div>
                         <div style="font-size:12px; color:#888;">最近 10 秒平均</div>
                     </div></div>
                 </div>
                 <div class="col-6 col-md-3">
-                    <div class="card"><div class="card-body" style="padding:10px 14px;">
+                    <div class="card" style="height:100%;"><div class="card-body" style="padding:10px 14px;">
                         <div style="font-size:12px; color:#666;">今日流量</div>
                         <div style="font-size:24px; font-weight:500;">{{ vm_bytes(data.todayBytes) }}</div>
                         <div style="font-size:12px; color:#888;">共 {{ data.todayPlays }} 次播放</div>
                     </div></div>
                 </div>
                 <div class="col-6 col-md-3">
-                    <div class="card" :class="data.slowCount ? 'border-warning' : ''" :style="data.slowCount ? 'background:#fff8e1;' : ''"><div class="card-body" style="padding:10px 14px;">
+                    <div class="card" style="height:100%;" :class="data.slowCount ? 'border-warning' : ''" :style="data.slowCount ? 'background:#fff8e1;' : ''"><div class="card-body" style="padding:10px 14px;">
                         <div style="font-size:12px;" :style="{color: data.slowCount ? '#8a6d00' : '#666'}">速率偏低</div>
                         <div style="font-size:24px; font-weight:500;" :style="{color: data.slowCount ? '#8a6d00' : ''}">{{ data.slowCount }} <span style="font-size:12px; font-weight:400;">個影片</span></div>
-                        <div style="font-size:12px; color:#888;">連線中、已播 20 秒以上、低於 1 Mbps</div>
+                        <div style="font-size:12px; color:#888;" title="影片連線還開著、已播 20 秒以上，最近 10 秒低於 1 Mbps">播 20 秒後仍低於 1 Mbps</div>
                     </div></div>
                 </div>
             </div>
