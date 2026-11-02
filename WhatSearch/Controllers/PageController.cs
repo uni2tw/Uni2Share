@@ -249,7 +249,7 @@ namespace WhatSearch.Controllers
         {
             if (User.Identity.IsAuthenticated == false)
             {
-                return Redirect("/page/login?returnUrl=" + Uri.EscapeDataString("/account"));
+                return Redirect("/page/login?returnUrl=" + Uri.EscapeDataString("/account" + Request.QueryString));
             }
             return View("Account");
         }

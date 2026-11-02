@@ -20,6 +20,12 @@
                     }
                 },
                 computed: {
+                    // 從哪個頁面進來的；只接受站內路徑，否則回首頁。
+                    // 開頭不能是 // 或 /\（瀏覽器會把反斜線當斜線，變成別的網站），也不能含反斜線與控制字元
+                    backUrl: function () {
+                        var url = new URLSearchParams(location.search).get('returnUrl');
+                        return url && /^\/(?![\/\\])[^\\\u0000-\u001f]*$/.test(url) ? url : '/page';
+                    },
                     maxLength: function () {
                         return this.info ? this.info.displayNameMaxLength : 20;
                     },
@@ -46,10 +52,13 @@
                     vm_home: function () {
                         location.href = '/page';
                     },
+                    vm_back: function () {
+                        location.href = this.backUrl;
+                    },
                     // 登入過期（或 token 被換掉）：回登入頁，登入後再回到這一頁
                     vm_onError: function (err) {
                         if (err && err.response && err.response.status === 401) {
-                            location.href = '/page/login?returnUrl=' + encodeURIComponent('/account');
+                            location.href = '/page/login?returnUrl=' + encodeURIComponent(location.pathname + location.search);
                             return;
                         }
                         this.vm_showAlert('發生錯誤，請稍後再試');
@@ -143,6 +152,7 @@
         <h1 class="h3" style="display:flex; align-items:center; gap:10px;">
             <button type="button" class="btn btn-sm btn-info" v-on:click="vm_home()" title="回首頁"><i class="fa fa-home"></i></button>
             我的帳號
+            <button type="button" class="btn btn-sm btn-outline-secondary" style="margin-left:auto;" v-on:click="vm_back()"><i class="fa fa-arrow-left"></i> 返回</button>
         </h1>
 
         <div v-if="!loaded" style="color:#888; padding:20px 0;">載入中…</div>
@@ -197,6 +207,10 @@
                     <div style="font-size:12px; color:#dc3545; min-height:18px;">{{ passwordError }}</div>
                     <button type="submit" class="btn btn-primary" style="margin-top:6px;" :disabled="savingPassword">變更密碼</button>
                 </form>
+            </div>
+
+            <div style="margin-top:16px; text-align:center;">
+                <button type="button" class="btn btn-outline-secondary" v-on:click="vm_back()"><i class="fa fa-arrow-left"></i> 返回</button>
             </div>
         </div>
     </div>
