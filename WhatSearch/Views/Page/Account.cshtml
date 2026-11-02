@@ -1,0 +1,203 @@
+﻿@{
+    this.Layout = "_Layout.cshtml";
+}
+
+    <script type="text/javascript">
+        document.addEventListener('DOMContentLoaded', function () {
+            const App = {
+                data() {
+                    return {
+                        loaded: false,
+                        info: null,
+                        displayName: '',
+                        savingName: false,
+                        oldPassword: '',
+                        newPassword: '',
+                        newPassword2: '',
+                        savingPassword: false,
+                        nameError: '',
+                        passwordError: ''
+                    }
+                },
+                computed: {
+                    maxLength: function () {
+                        return this.info ? this.info.displayNameMaxLength : 20;
+                    },
+                    // 用「字」算（emoji 之類算 1 個），和伺服器的算法一致
+                    nameLength: function () {
+                        return Array.from(this.displayName.trim()).length;
+                    }
+                },
+                mounted: function () {
+                    this.vm_load();
+                },
+                methods: {
+                    vm_showAlert: function (text) {
+                        var el = document.querySelector('.alert');
+                        el.textContent = text;
+                        el.style.display = 'block';
+                        el.style.opacity = '1';
+                        window.setTimeout(function () {
+                            el.style.transition = 'opacity 0.4s';
+                            el.style.opacity = '0';
+                            window.setTimeout(function () { el.style.display = 'none'; }, 400);
+                        }, 3500);
+                    },
+                    vm_home: function () {
+                        location.href = '/page';
+                    },
+                    // 登入過期（或 token 被換掉）：回登入頁，登入後再回到這一頁
+                    vm_onError: function (err) {
+                        if (err && err.response && err.response.status === 401) {
+                            location.href = '/page/login?returnUrl=' + encodeURIComponent('/account');
+                            return;
+                        }
+                        this.vm_showAlert('發生錯誤，請稍後再試');
+                    },
+                    vm_load: function () {
+                        var self = this;
+                        axios.get('/account/data').then(function (res) {
+                            self.info = res.data;
+                            self.displayName = res.data.display;
+                            self.loaded = true;
+                        }).catch(function (err) {
+                            self.vm_onError(err);
+                        });
+                    },
+                    vm_saveName: function () {
+                        var self = this;
+                        self.nameError = '';
+                        if (self.displayName.trim().length === 0) {
+                            self.nameError = '顯示名稱不可空白';
+                            return;
+                        }
+                        if (self.nameLength > self.maxLength) {
+                            self.nameError = '顯示名稱最多 ' + self.maxLength + ' 個字';
+                            return;
+                        }
+                        self.savingName = true;
+                        axios.post('/account/displayName', { displayName: self.displayName }).then(function (res) {
+                            if (res.data.success) {
+                                self.info.display = res.data.display;
+                                self.displayName = res.data.display;
+                                self.vm_showAlert(res.data.message);
+                            } else {
+                                self.nameError = res.data.message;
+                            }
+                        }).catch(function (err) {
+                            self.vm_onError(err);
+                        }).finally(function () {
+                            self.savingName = false;
+                        });
+                    },
+                    vm_savePassword: function () {
+                        var self = this;
+                        self.passwordError = '';
+                        if (!self.oldPassword) {
+                            self.passwordError = '請輸入目前的密碼';
+                            return;
+                        }
+                        if (!self.newPassword.trim()) {
+                            self.passwordError = '新密碼不可空白';
+                            return;
+                        }
+                        if (self.newPassword.length > 128) {
+                            self.passwordError = '新密碼太長（最多 128 個字元）';
+                            return;
+                        }
+                        if (self.newPassword !== self.newPassword2) {
+                            self.passwordError = '兩次輸入的新密碼不一樣';
+                            return;
+                        }
+                        self.savingPassword = true;
+                        axios.post('/account/password', { oldPassword: self.oldPassword, newPassword: self.newPassword }).then(function (res) {
+                            if (res.data.success) {
+                                self.oldPassword = '';
+                                self.newPassword = '';
+                                self.newPassword2 = '';
+                                self.vm_showAlert(res.data.message);
+                            } else {
+                                self.passwordError = res.data.message;
+                            }
+                        }).catch(function (err) {
+                            self.vm_onError(err);
+                        }).finally(function () {
+                            self.savingPassword = false;
+                        });
+                    },
+                    vm_time: function (value) {
+                        if (!value || value.indexOf('0001-') === 0) {
+                            return '—';
+                        }
+                        return new Date(value).toLocaleString();
+                    }
+                }
+            };
+            window.app = Vue.createApp(App).mount('#main');
+        });
+    </script>
+
+<body>
+    <div id="main" class="container" style="max-width:560px; padding-top:16px; padding-bottom:40px;" v-cloak>
+        <div class="alert alert-info" style="display:none; margin-bottom:10px"></div>
+        <h1 class="h3" style="display:flex; align-items:center; gap:10px;">
+            <button type="button" class="btn btn-sm btn-info" v-on:click="vm_home()" title="回首頁"><i class="fa fa-home"></i></button>
+            我的帳號
+        </h1>
+
+        <div v-if="!loaded" style="color:#888; padding:20px 0;">載入中…</div>
+
+        <div v-else>
+            <div class="card" style="margin-bottom:14px;">
+                <div class="card-header" style="font-weight:bold; font-size:14px;">基本資料</div>
+                <table class="table table-sm align-middle" style="margin:0; font-size:14px;">
+                    <tbody>
+                        <tr><td style="width:110px; color:#666;">帳號</td><td>{{ info.name }}</td></tr>
+                        <tr><td style="color:#666;">身分</td><td>
+                            <span v-if="info.admin" class="badge bg-warning text-dark"><i class="fa-solid fa-crown"></i> 管理者</span>
+                            <span v-else class="badge bg-success">會員</span>
+                        </td></tr>
+                        <tr><td style="color:#666;">註冊日期</td><td>{{ vm_time(info.create) }}</td></tr>
+                        <tr><td style="color:#666;">最近登入</td><td>{{ vm_time(info.access) }}</td></tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <div class="card" style="margin-bottom:14px;">
+                <div class="card-header" style="font-weight:bold; font-size:14px;">顯示名稱</div>
+                <form class="card-body" v-on:submit.prevent="vm_saveName()">
+                    <div style="font-size:13px; color:#666; margin-bottom:8px;">管理頁與播放監控會顯示這個名稱。最多 {{ maxLength }} 個字。</div>
+                    <div style="display:flex; gap:8px; align-items:center;">
+                        <input type="text" class="form-control" v-model="displayName" autocomplete="nickname" />
+                        <button type="submit" class="btn btn-primary" style="white-space:nowrap;" :disabled="savingName">儲存</button>
+                    </div>
+                    <div style="display:flex; justify-content:space-between; font-size:12px; margin-top:4px;">
+                        <span style="color:#dc3545;">{{ nameError }}</span>
+                        <span :style="{color: nameLength > maxLength ? '#dc3545' : '#888'}">{{ nameLength }} / {{ maxLength }}</span>
+                    </div>
+                </form>
+            </div>
+
+            <div class="card">
+                <div class="card-header" style="font-weight:bold; font-size:14px;">變更密碼</div>
+                <form class="card-body" v-on:submit.prevent="vm_savePassword()">
+                    <div style="font-size:13px; color:#666; margin-bottom:8px;">變更後，其他裝置上的登入會失效（需要重新登入），這台裝置不受影響。</div>
+                    <div class="mb-2">
+                        <label style="font-size:13px;">目前的密碼</label>
+                        <input type="password" class="form-control" v-model="oldPassword" autocomplete="current-password" />
+                    </div>
+                    <div class="mb-2">
+                        <label style="font-size:13px;">新密碼</label>
+                        <input type="password" class="form-control" v-model="newPassword" autocomplete="new-password" />
+                    </div>
+                    <div class="mb-2">
+                        <label style="font-size:13px;">再輸入一次新密碼</label>
+                        <input type="password" class="form-control" v-model="newPassword2" autocomplete="new-password" />
+                    </div>
+                    <div style="font-size:12px; color:#dc3545; min-height:18px;">{{ passwordError }}</div>
+                    <button type="submit" class="btn btn-primary" style="margin-top:6px;" :disabled="savingPassword">變更密碼</button>
+                </form>
+            </div>
+        </div>
+    </div>
+</body>

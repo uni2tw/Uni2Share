@@ -484,6 +484,7 @@
                     <button v-if="isLoggedIn" type="button" v-on:click.stop="vm_menuAction(vm_showFavorites)">
                         <i class="fa-solid fa-heart"></i> 我的最愛
                     </button>
+                    <a v-if="isLoggedIn" href="/account"><i class="fa fa-user"></i> 我的帳號</a>
                     <a v-if="isLoggedIn" :href="logoutHref()"><i class="fa fa-sign-out-alt"></i> 登出</a>
                 </div>
             </div>
