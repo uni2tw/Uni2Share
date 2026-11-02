@@ -31,6 +31,7 @@ namespace WhatSearch.Core
             builder.RegisterType<LoudnessService>().As<ILoudnessService>().SingleInstance();
             builder.RegisterType<TranscodeService>().As<ITranscodeService>().SingleInstance();
             builder.RegisterType<PlaybackMonitorService>().As<IPlaybackMonitorService>().SingleInstance();
+            builder.RegisterType<FolderCoverService>().As<IFolderCoverService>().SingleInstance();
             builder.RegisterType<RatingService>().As<IRatingService>().SingleInstance();
             builder.RegisterType<UnplayableService>().As<IUnplayableService>().SingleInstance();
             builder.RegisterType<VideoConvertService>().As<IVideoConvertService>().SingleInstance();

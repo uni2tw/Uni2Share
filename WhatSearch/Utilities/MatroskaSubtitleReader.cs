@@ -58,6 +58,17 @@ namespace WhatSearch.Utilities
 
         const int SubtitleTrackType = 17;
 
+        const uint IdAttachments = 0x1941A469;
+        const uint IdAttachedFile = 0x61A7;
+        const uint IdFileName = 0x466E;
+        const uint IdFileMimeType = 0x4660;
+        const uint IdFileData = 0x465C;
+        const uint IdSeekHead = 0x114D9B74;
+        const uint IdSeek = 0x4DBB;
+        const uint IdSeekId = 0x53AB;
+        const uint IdSeekPosition = 0x53AC;
+        const int MaxCoverBytes = 8 * 1024 * 1024;
+
         // Segment 的直接子元素；未知大小的 Cluster 遇到這些 ID 就代表結束
         static readonly HashSet<uint> SegmentLevelIds = new HashSet<uint>
         {
@@ -220,6 +231,218 @@ namespace WhatSearch.Utilities
                 }
             }
             return result;
+        }
+
+        /// <summary>
+        /// 讀 MKV 內嵌的封面圖（Matroska 的「附件」裡 image/* 的檔案，規格建議命名 cover.jpg／cover.png）。
+        /// 沒有附件、沒有圖片、檔案壞掉或圖片超過 8 MB 都回傳 null。同時有好幾張時優先 cover、folder、poster，
+        /// 其次檔名以 cover 開頭的，最後才是其他圖片（small_cover、thumb 這類縮圖排最後）。
+        /// </summary>
+        public static byte[] ReadCoverAttachment(string path, out string mimeType)
+        {
+            mimeType = null;
+            try
+            {
+                using (FileStream fs = OpenRead(path))
+                {
+                    return FindCoverAttachment(fs, out mimeType);
+                }
+            }
+            catch (Exception)
+            {
+                mimeType = null;
+                return null;
+            }
+        }
+
+        static byte[] FindCoverAttachment(FileStream fs, out string mimeType)
+        {
+            mimeType = null;
+            uint id;
+            long size;
+            bool unknown;
+            if (ReadHeader(fs, out id, out size, out unknown) == false || id != IdEbml)
+            {
+                return null;
+            }
+            fs.Seek(size, SeekOrigin.Current);
+            while (fs.Position < fs.Length)
+            {
+                if (ReadHeader(fs, out id, out size, out unknown) == false)
+                {
+                    return null;
+                }
+                if (id != IdSegment)
+                {
+                    if (unknown)
+                    {
+                        return null;
+                    }
+                    fs.Seek(size, SeekOrigin.Current);
+                    continue;
+                }
+                long segmentDataStart = fs.Position;
+                long segmentEnd = unknown ? fs.Length : Math.Min(fs.Length, fs.Position + size);
+                long attachmentsPos = -1;
+                while (fs.Position < segmentEnd)
+                {
+                    if (ReadHeader(fs, out id, out size, out unknown) == false)
+                    {
+                        return null;
+                    }
+                    long next = unknown ? segmentEnd : fs.Position + size;
+                    if (id == IdAttachments)
+                    {
+                        return ReadAttachments(fs, next, out mimeType);
+                    }
+                    if (id == IdSeekHead)
+                    {
+                        long pos = ReadSeekHeadForAttachments(fs, next, segmentDataStart);
+                        if (pos >= 0)
+                        {
+                            attachmentsPos = pos;
+                        }
+                    }
+                    else if (id == IdCluster)
+                    {
+                        // 附件通常在第一個 Cluster 之前；不在的話靠 SeekHead 記的位置跳過去
+                        if (attachmentsPos > 0 && attachmentsPos < segmentEnd)
+                        {
+                            fs.Seek(attachmentsPos, SeekOrigin.Begin);
+                            if (ReadHeader(fs, out id, out size, out unknown) && id == IdAttachments && unknown == false)
+                            {
+                                return ReadAttachments(fs, fs.Position + size, out mimeType);
+                            }
+                        }
+                        return null;
+                    }
+                    if (unknown)
+                    {
+                        return null;
+                    }
+                    fs.Seek(next, SeekOrigin.Begin);
+                }
+                return null;
+            }
+            return null;
+        }
+
+        // SeekHead 裡記著各個頂層元素的位置（相對於 Segment 資料開頭）；找 Attachments 的，沒有回傳 -1
+        static long ReadSeekHeadForAttachments(FileStream fs, long end, long segmentDataStart)
+        {
+            long found = -1;
+            uint id;
+            long size;
+            bool unknown;
+            while (fs.Position < end && ReadHeader(fs, out id, out size, out unknown))
+            {
+                long next = fs.Position + size;
+                if (id == IdSeek && unknown == false)
+                {
+                    uint targetId = 0;
+                    long position = -1;
+                    while (fs.Position < next && ReadHeader(fs, out id, out size, out unknown))
+                    {
+                        long inner = fs.Position + size;
+                        if (id == IdSeekId && size > 0 && size <= 4)
+                        {
+                            foreach (byte b in ReadBytes(fs, (int)size))
+                            {
+                                targetId = (targetId << 8) | b;
+                            }
+                        }
+                        else if (id == IdSeekPosition && size > 0 && size <= 8)
+                        {
+                            position = (long)ReadUInt(fs, (int)size);
+                        }
+                        fs.Seek(inner, SeekOrigin.Begin);
+                    }
+                    if (targetId == IdAttachments && position >= 0)
+                    {
+                        found = segmentDataStart + position;
+                    }
+                }
+                if (unknown)
+                {
+                    break;
+                }
+                fs.Seek(next, SeekOrigin.Begin);
+            }
+            return found;
+        }
+
+        static byte[] ReadAttachments(FileStream fs, long end, out string mimeType)
+        {
+            mimeType = null;
+            long bestPos = -1, bestSize = 0;
+            int bestRank = int.MaxValue;
+            string bestMime = null;
+            uint id;
+            long size;
+            bool unknown;
+            while (fs.Position < end && ReadHeader(fs, out id, out size, out unknown) && unknown == false)
+            {
+                long next = fs.Position + size;
+                if (id == IdAttachedFile)
+                {
+                    string name = null, mime = null;
+                    long dataPos = -1, dataSize = 0;
+                    while (fs.Position < next && ReadHeader(fs, out id, out size, out unknown) && unknown == false)
+                    {
+                        long inner = fs.Position + size;
+                        if (id == IdFileName)
+                        {
+                            name = ReadString(fs, (int)Math.Min(size, 1024));
+                        }
+                        else if (id == IdFileMimeType)
+                        {
+                            mime = ReadString(fs, (int)Math.Min(size, 256));
+                        }
+                        else if (id == IdFileData)
+                        {
+                            dataPos = fs.Position;
+                            dataSize = size;
+                        }
+                        fs.Seek(inner, SeekOrigin.Begin);
+                    }
+                    if (dataPos >= 0 && dataSize > 0 && dataSize <= MaxCoverBytes && string.IsNullOrEmpty(mime) == false &&
+                        mime.StartsWith("image/", StringComparison.OrdinalIgnoreCase))
+                    {
+                        int rank = CoverRank(name);
+                        if (rank < bestRank)
+                        {
+                            bestRank = rank;
+                            bestPos = dataPos;
+                            bestSize = dataSize;
+                            bestMime = mime.ToLowerInvariant();
+                        }
+                    }
+                }
+                fs.Seek(next, SeekOrigin.Begin);
+            }
+            if (bestPos < 0)
+            {
+                return null;
+            }
+            fs.Seek(bestPos, SeekOrigin.Begin);
+            byte[] data = ReadBytes(fs, (int)bestSize);
+            if (data.Length != bestSize)
+            {
+                return null;
+            }
+            mimeType = bestMime;
+            return data;
+        }
+
+        internal static int CoverRank(string fileName)
+        {
+            string baseName = System.IO.Path.GetFileNameWithoutExtension(fileName ?? string.Empty).ToLowerInvariant();
+            if (baseName == "cover") { return 0; }
+            if (baseName == "folder") { return 1; }
+            if (baseName == "poster") { return 2; }
+            if (baseName.StartsWith("cover")) { return 3; }
+            if (baseName.StartsWith("small") || baseName.StartsWith("thumb")) { return 5; }
+            return 4;
         }
 
         static FileStream OpenRead(string path)
