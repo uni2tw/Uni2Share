@@ -1009,7 +1009,7 @@
                 <input type="text" class="form-control form-control-sm" v-model="coverEdit.keyword" maxlength="100" placeholder="作品名稱（中文查不到時改日文或英文）" />
                 <button type="submit" class="btn btn-sm btn-primary" style="white-space:nowrap;" :disabled="coverEdit.loading || coverEdit.saving"><i class="fa fa-search"></i> 搜尋</button>
             </form>
-            <div style="font-size:12px; color:#888; margin:6px 0;">從 AniList 與 Bangumi（中文名稱比較查得到）找候選圖。選一張就會存成這個資料夾的 cover.jpg（已經有的會被覆蓋）。</div>
+            <div style="font-size:12px; color:#888; margin:6px 0;">從 AniList、Bangumi（中文名稱比較查得到）與 Kitsu 找候選圖。選一張就會存成這個資料夾的 cover.jpg（已經有的會被覆蓋）。</div>
             <div v-if="coverEdit.warning" style="color:#b26a00; font-size:12px; margin-bottom:6px;"><i class="fa fa-triangle-exclamation"></i> {{ coverEdit.warning }}</div>
             <div v-if="coverEdit.loading" style="color:#888; padding:14px 0;">搜尋中…</div>
             <div v-else-if="coverEdit.error" style="color:#dc3545; padding:8px 0; font-size:14px;">{{ coverEdit.error }}</div>
