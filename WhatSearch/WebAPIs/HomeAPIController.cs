@@ -204,7 +204,7 @@ namespace WhatSearch.WebAPIs
             {
                 return NotFound();
             }
-            Response.Headers["Cache-Control"] = "private, max-age=3600";
+            Response.Headers["Cache-Control"] = "no-store";
             return this.File(cover.Data, cover.MimeType);
         }
 
