@@ -189,7 +189,10 @@
         <h1 class="h3" style="display:flex; align-items:center; gap:10px;">
             <button type="button" class="btn btn-sm btn-info" v-on:click="vm_home()" title="回首頁"><i class="fa fa-home"></i></button>
             會員管理
-            <a href="/admin/convert" class="btn btn-sm btn-outline-secondary" style="margin-left:auto;"><i class="fa fa-film"></i> MKV 轉檔</a>
+            <span style="margin-left:auto; display:flex; gap:6px;">
+                <a href="/admin/monitor" class="btn btn-sm btn-outline-secondary"><i class="fa fa-chart-line"></i> 播放監控</a>
+                <a href="/admin/convert" class="btn btn-sm btn-outline-secondary"><i class="fa fa-film"></i> MKV 轉檔</a>
+            </span>
         </h1>
         <div style="font-size:13px; color:#666; margin:0 0 12px 0; line-height:2;">
             <span class="badge bg-warning text-dark"><i class="fa-solid fa-crown"></i> 管理者</span> 可進這個管理頁、標註動畫無法播放；

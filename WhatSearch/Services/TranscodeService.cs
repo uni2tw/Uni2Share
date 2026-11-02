@@ -27,6 +27,10 @@ namespace WhatSearch.Services
         string GetReadyFile(string fullPath);
         /// <summary>把這個檔案移到佇列最前面（使用者點了還沒轉好的那首）</summary>
         void Prioritize(string fullPath);
+        /// <summary>轉檔快取目前佔用的位元組（沒啟用為 0；最多 30 秒更新一次，不會每次都掃資料夾）</summary>
+        long CacheBytes { get; }
+        /// <summary>轉檔快取的上限位元組（config 的 maxCacheGB）</summary>
+        long CacheLimitBytes { get; }
     }
 
     /// <summary>
@@ -63,6 +67,42 @@ namespace WhatSearch.Services
         public bool IsSource(string fullPath)
         {
             return string.Equals(Path.GetExtension(fullPath), ".flac", StringComparison.OrdinalIgnoreCase);
+        }
+
+        public long CacheLimitBytes
+        {
+            get { return (long)(Math.Max(0.1, config.Transcode.MaxCacheGB) * 1024 * 1024 * 1024); }
+        }
+
+        readonly object cacheSizeLock = new object();
+        long cacheBytes;
+        DateTime cacheBytesAt = DateTime.MinValue;
+
+        public long CacheBytes
+        {
+            get
+            {
+                if (Enabled == false)
+                {
+                    return 0;
+                }
+                lock (cacheSizeLock)
+                {
+                    if ((DateTime.Now - cacheBytesAt).TotalSeconds > 30)
+                    {
+                        try
+                        {
+                            cacheBytes = new DirectoryInfo(CacheFolder()).GetFiles("*.mp3").Sum(f => f.Length);
+                        }
+                        catch
+                        {
+                            cacheBytes = 0;
+                        }
+                        cacheBytesAt = DateTime.Now;
+                    }
+                    return cacheBytes;
+                }
+            }
         }
 
         string CacheFolder()
@@ -348,7 +388,7 @@ namespace WhatSearch.Services
         {
             try
             {
-                long limit = (long)(Math.Max(0.1, config.Transcode.MaxCacheGB) * 1024 * 1024 * 1024);
+                long limit = CacheLimitBytes;
                 List<FileInfo> files = new DirectoryInfo(CacheFolder()).GetFiles("*.mp3").OrderBy(f => f.LastWriteTimeUtc).ToList();
                 long total = files.Sum(f => f.Length);
                 int removed = 0;

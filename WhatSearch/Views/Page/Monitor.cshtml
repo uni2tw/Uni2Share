@@ -1,0 +1,257 @@
+﻿@{
+    this.Layout = "_Layout.cshtml";
+}
+
+    <script type="text/javascript">
+        document.addEventListener('DOMContentLoaded', function () {
+            const App = {
+                data() {
+                    return {
+                        loaded: false,
+                        failed: false,
+                        data: null,
+                        timer: null
+                    }
+                },
+                computed: {
+                    sessions: function () {
+                        return this.data ? this.data.sessions : [];
+                    },
+                    activeSessions: function () {
+                        return this.sessions.filter(function (s) { return s.active; });
+                    },
+                    recentSessions: function () {
+                        return this.sessions.filter(function (s) { return !s.active; });
+                    },
+                    // 今日每小時流量長條圖
+                    bars: function () {
+                        var hours = this.data ? this.data.hours : [];
+                        var max = Math.max.apply(null, hours.concat([1]));
+                        var self = this;
+                        return hours.map(function (b, h) {
+                            var height = b > 0 ? Math.max(2, Math.round(b / max * 60)) : 0;
+                            return { x: h * 10 + 2, y: 64 - height, h: height, peak: b === max && b > 0, title: h + ':00　' + self.vm_bytes(b) };
+                        });
+                    },
+                    peakText: function () {
+                        var hours = this.data ? this.data.hours : [];
+                        var max = Math.max.apply(null, hours.concat([0]));
+                        if (max <= 0) {
+                            return '今天還沒有播放流量';
+                        }
+                        return '尖峰在 ' + hours.indexOf(max) + ' 點，約 ' + this.vm_bytes(max);
+                    },
+                    maxUserBytes: function () {
+                        var list = this.data ? this.data.users : [];
+                        return Math.max.apply(null, list.map(function (u) { return u.bytes; }).concat([1]));
+                    },
+                    maxFolderCount: function () {
+                        var list = this.data ? this.data.folders : [];
+                        return Math.max.apply(null, list.map(function (f) { return f.count; }).concat([1]));
+                    }
+                },
+                mounted: function () {
+                    var self = this;
+                    self.vm_load();
+                    self.timer = window.setInterval(function () {
+                        if (!document.hidden) {
+                            self.vm_load();
+                        }
+                    }, 3000);
+                },
+                methods: {
+                    vm_home: function () {
+                        location.href = '/page';
+                    },
+                    vm_load: function () {
+                        var self = this;
+                        axios.get('/admin/monitor/data').then(function (res) {
+                            self.data = res.data;
+                            self.failed = false;
+                            self.loaded = true;
+                        }).catch(function () {
+                            self.failed = true;
+                        });
+                    },
+                    vm_bytes: function (n) {
+                        n = n || 0;
+                        if (n < 1024) { return n + ' B'; }
+                        if (n < 1024 * 1024) { return (n / 1024).toFixed(1) + ' KB'; }
+                        if (n < 1024 * 1024 * 1024) { return (n / 1024 / 1024).toFixed(1) + ' MB'; }
+                        return (n / 1024 / 1024 / 1024).toFixed(2) + ' GB';
+                    },
+                    vm_duration: function (sec) {
+                        if (sec < 60) { return '不到 1 分'; }
+                        var m = Math.floor(sec / 60);
+                        if (m < 60) { return m + ' 分'; }
+                        return Math.floor(m / 60) + ' 小時 ' + (m % 60) + ' 分';
+                    },
+                    vm_percent: function (count, total) {
+                        return total > 0 ? Math.round(count * 100 / total) : 0;
+                    },
+                    vm_lastSegment: function (path) {
+                        var parts = (path || '').split('/');
+                        return parts[parts.length - 1] || path;
+                    },
+                    vm_time: function (ms) {
+                        return ms ? new Date(ms).toLocaleString() : '';
+                    },
+                    vm_uptime: function (ms) {
+                        return ms ? this.vm_duration(Math.floor((Date.now() - ms) / 1000)) : '';
+                    }
+                }
+            };
+            window.app = Vue.createApp(App).mount('#main');
+        });
+    </script>
+
+<body>
+    <div id="main" class="container" style="max-width:1000px; padding-top:16px; padding-bottom:40px;" v-cloak>
+        <h1 class="h3" style="display:flex; align-items:center; gap:10px;">
+            <button type="button" class="btn btn-sm btn-info" v-on:click="vm_home()" title="回首頁"><i class="fa fa-home"></i></button>
+            播放監控
+            <span style="margin-left:auto; display:flex; gap:6px;">
+                <a href="/admin" class="btn btn-sm btn-outline-secondary"><i class="fa fa-users"></i> 會員管理</a>
+                <a href="/admin/convert" class="btn btn-sm btn-outline-secondary"><i class="fa fa-film"></i> MKV 轉檔</a>
+            </span>
+        </h1>
+        <div style="font-size:13px; color:#666; margin:0 0 12px 0; line-height:1.7;">
+            只統計影片與音樂的播放（不含封面、字幕、下載），每 3 秒更新。資料只放在伺服器記憶體，重新啟動會歸零。
+            同一個人、同一個 IP 播同一個檔案的多個請求算同一次播放；連線都結束 60 秒後就不再列出。
+            <span v-if="failed" style="color:#dc3545;"><i class="fa fa-triangle-exclamation"></i> 更新失敗，顯示的是上一次的資料</span>
+        </div>
+
+        <div v-if="!loaded" style="color:#888; padding:20px 0;">載入中…</div>
+
+        <div v-else>
+            <div class="row g-2" style="margin-bottom:14px;">
+                <div class="col-6 col-md-3">
+                    <div class="card"><div class="card-body" style="padding:10px 14px;">
+                        <div style="font-size:12px; color:#666;">正在播放</div>
+                        <div style="font-size:24px; font-weight:500;">{{ activeSessions.length }} <span style="font-size:12px; color:#888; font-weight:400;">個</span></div>
+                        <div v-if="recentSessions.length" style="font-size:12px; color:#888;">另有 {{ recentSessions.length }} 個剛結束</div>
+                    </div></div>
+                </div>
+                <div class="col-6 col-md-3">
+                    <div class="card"><div class="card-body" style="padding:10px 14px;">
+                        <div style="font-size:12px; color:#666;">目前輸出</div>
+                        <div style="font-size:24px; font-weight:500;">{{ data.mbps.toFixed(1) }} <span style="font-size:12px; color:#888; font-weight:400;">Mbps</span></div>
+                        <div style="font-size:12px; color:#888;">最近 10 秒平均</div>
+                    </div></div>
+                </div>
+                <div class="col-6 col-md-3">
+                    <div class="card"><div class="card-body" style="padding:10px 14px;">
+                        <div style="font-size:12px; color:#666;">今日流量</div>
+                        <div style="font-size:24px; font-weight:500;">{{ vm_bytes(data.todayBytes) }}</div>
+                        <div style="font-size:12px; color:#888;">共 {{ data.todayPlays }} 次播放</div>
+                    </div></div>
+                </div>
+                <div class="col-6 col-md-3">
+                    <div class="card" :class="data.slowCount ? 'border-warning' : ''" :style="data.slowCount ? 'background:#fff8e1;' : ''"><div class="card-body" style="padding:10px 14px;">
+                        <div style="font-size:12px;" :style="{color: data.slowCount ? '#8a6d00' : '#666'}">速率偏低</div>
+                        <div style="font-size:24px; font-weight:500;" :style="{color: data.slowCount ? '#8a6d00' : ''}">{{ data.slowCount }} <span style="font-size:12px; font-weight:400;">個影片</span></div>
+                        <div style="font-size:12px; color:#888;">連線中、已播 20 秒以上、低於 1 Mbps</div>
+                    </div></div>
+                </div>
+            </div>
+
+            <div class="card" style="margin-bottom:14px;">
+                <div class="card-header" style="font-weight:bold; font-size:14px;">現在誰在播什麼</div>
+                <div v-if="!sessions.length" style="color:#888; padding:16px;">目前沒有人在播放。</div>
+                <div v-else class="table-responsive">
+                    <table class="table table-sm align-middle" style="margin:0; font-size:13px;">
+                        <tbody>
+                            <tr v-for="s in sessions" :key="s.user + s.ip + s.folder + s.name + s.kind">
+                                <td style="white-space:nowrap;">
+                                    <div>{{ s.display }}</div>
+                                    <div style="font-size:11px; color:#888;">{{ s.device }} · {{ s.ip }}</div>
+                                </td>
+                                <td style="min-width:180px;">
+                                    <div style="word-break:break-all;">
+                                        <i class="fa" :class="s.kind === 'video' ? 'fa-film' : 'fa-music'" style="color:#888; margin-right:4px;"></i>{{ s.name }}
+                                        <span v-if="s.kind === 'mp3'" class="badge bg-light text-dark" title="播的是 FLAC 轉好的 MP3 快取版">轉 MP3</span>
+                                    </div>
+                                    <div style="font-size:11px; color:#888; word-break:break-all;">{{ s.folder }}</div>
+                                </td>
+                                <td style="white-space:nowrap;" :style="{color: s.slow ? '#b45309' : ''}">
+                                    <span v-if="s.active">{{ s.mbps.toFixed(1) }} Mbps</span>
+                                    <span v-else style="color:#888;">—</span>
+                                    <span v-if="s.slow" class="badge bg-warning text-dark" title="連線還開著但速率偏低：網路太慢、卡頓，也可能只是使用者暫停中">偏低</span>
+                                </td>
+                                <td style="white-space:nowrap; color:#666;">
+                                    <div>已播 {{ vm_duration(s.seconds) }}</div>
+                                    <div style="font-size:11px; color:#888;">{{ vm_bytes(s.bytes) }}</div>
+                                </td>
+                                <td style="white-space:nowrap; text-align:right;">
+                                    <span v-if="s.active" class="badge bg-success">傳輸中</span>
+                                    <span v-else class="badge bg-secondary">剛結束</span>
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div class="row g-2" style="margin-bottom:14px;">
+                <div class="col-12 col-md-7">
+                    <div class="card" style="height:100%;"><div class="card-body" style="padding:12px 14px;">
+                        <div style="font-weight:bold; font-size:14px; margin-bottom:6px;">今日每小時流量</div>
+                        <svg viewBox="0 0 240 78" width="100%" role="img" aria-label="今日每小時流量長條圖">
+                            <rect v-for="(b, i) in bars" :key="i" :x="b.x" :y="b.y" width="7" :height="b.h" :fill="b.peak ? '#0d6efd' : '#9ec5fe'"><title>{{ b.title }}</title></rect>
+                            <line x1="0" y1="64.5" x2="240" y2="64.5" stroke="#dee2e6" stroke-width="0.5"></line>
+                            <text x="2" y="75" font-size="7" fill="#888">0</text>
+                            <text x="62" y="75" font-size="7" fill="#888">6</text>
+                            <text x="122" y="75" font-size="7" fill="#888">12</text>
+                            <text x="182" y="75" font-size="7" fill="#888">18</text>
+                        </svg>
+                        <div style="font-size:12px; color:#666;">{{ peakText }}（伺服器的時區）</div>
+                    </div></div>
+                </div>
+                <div class="col-12 col-md-5">
+                    <div class="card" style="height:100%;"><div class="card-body" style="padding:12px 14px;">
+                        <div style="font-weight:bold; font-size:14px; margin-bottom:8px;">今日流量排行</div>
+                        <div v-if="!data.users.length" style="color:#888; font-size:13px;">今天還沒有人播放。</div>
+                        <div v-for="u in data.users" :key="u.user" style="margin-bottom:8px; font-size:13px;">
+                            <div style="display:flex; justify-content:space-between;"><span>{{ u.display }}</span><span>{{ vm_bytes(u.bytes) }}</span></div>
+                            <div class="progress" style="height:5px;"><div class="progress-bar" :style="{width: Math.round(u.bytes * 100 / maxUserBytes) + '%'}"></div></div>
+                        </div>
+                    </div></div>
+                </div>
+            </div>
+
+            <div class="row g-2">
+                <div class="col-12 col-md-4">
+                    <div class="card" style="height:100%;"><div class="card-body" style="padding:12px 14px; font-size:13px;">
+                        <div style="font-weight:bold; font-size:14px; margin-bottom:6px;">近 7 天熱門資料夾</div>
+                        <div v-if="!data.folders.length" style="color:#888;">還沒有資料。</div>
+                        <div v-for="(f, i) in data.folders" :key="f.name" style="margin-bottom:6px;">
+                            <div style="display:flex; justify-content:space-between; gap:8px;">
+                                <span style="word-break:break-all;" :title="f.name">{{ i + 1 }}. {{ vm_lastSegment(f.name) }}</span>
+                                <span style="white-space:nowrap; color:#666;">{{ f.count }} 次</span>
+                            </div>
+                            <div class="progress" style="height:4px;"><div class="progress-bar bg-secondary" :style="{width: Math.round(f.count * 100 / maxFolderCount) + '%'}"></div></div>
+                        </div>
+                    </div></div>
+                </div>
+                <div class="col-12 col-md-4">
+                    <div class="card" style="height:100%;"><div class="card-body" style="padding:12px 14px; font-size:13px;">
+                        <div style="font-weight:bold; font-size:14px; margin-bottom:6px;">近 7 天裝置分布</div>
+                        <div v-if="!data.devices.length" style="color:#888;">還沒有資料。</div>
+                        <div v-for="d in data.devices" :key="d.name" style="display:flex; justify-content:space-between; line-height:1.8;">
+                            <span>{{ d.name }}</span><span style="color:#666;">{{ vm_percent(d.count, data.weekPlays) }}%（{{ d.count }} 次）</span>
+                        </div>
+                    </div></div>
+                </div>
+                <div class="col-12 col-md-4">
+                    <div class="card" style="height:100%;"><div class="card-body" style="padding:12px 14px; font-size:13px; line-height:1.8;">
+                        <div style="font-weight:bold; font-size:14px; margin-bottom:6px;">伺服器</div>
+                        <div>MKV 轉檔：<span v-if="data.server.convertRunning || data.server.convertPending">{{ data.server.convertRunning }} 個進行中、{{ data.server.convertPending }} 個排隊</span><span v-else style="color:#888;">沒有工作</span></div>
+                        <div>FLAC 轉 MP3 快取：<span v-if="data.server.transcodeEnabled">{{ vm_bytes(data.server.cacheBytes) }} / {{ vm_bytes(data.server.cacheLimitBytes) }}</span><span v-else style="color:#888;">未啟用</span></div>
+                        <div>搜尋索引：{{ data.server.indexedFiles.toLocaleString() }} 個檔案</div>
+                        <div>已執行：{{ vm_uptime(data.server.startedAt) }}</div>
+                    </div></div>
+                </div>
+            </div>
+        </div>
+    </div>
+</body>
