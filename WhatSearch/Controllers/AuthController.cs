@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Mvc;
 using System;
+using System.Linq;
 using WhatSearch.Core;
 using WhatSearch.Middlewares;
 using WhatSearch.Services.Interfaces;
@@ -56,7 +57,9 @@ namespace WhatSearch.Controllers
             {
                 return fallback;
             }
-            if (returnUrl.StartsWith("/") == false || returnUrl.StartsWith("//"))
+            // 開頭不能是 // 或 /\（瀏覽器會把反斜線當斜線，變成別的網站），也不能含反斜線與控制字元
+            if (returnUrl.StartsWith("/") == false || returnUrl.StartsWith("//") || returnUrl.Contains('\\') ||
+                returnUrl.Any(char.IsControl))
             {
                 return fallback;
             }
