@@ -597,9 +597,15 @@ namespace WhatSearch.Services
             {
                 throw;
             }
-            catch (Exception)
+            catch (Exception ex)
             {
-                throw new InvalidOperationException("連不上 " + name);
+                // 附上最內層的例外訊息，方便判斷是 TLS、DNS 還是逾時
+                Exception inner = ex;
+                while (inner.InnerException != null)
+                {
+                    inner = inner.InnerException;
+                }
+                throw new InvalidOperationException("連不上 " + name + "（" + inner.Message + "）");
             }
         }
 
