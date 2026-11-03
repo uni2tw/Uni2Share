@@ -61,16 +61,20 @@ namespace WhatSearch.Services
                 }
             }
 
-            IEnumerable<string> videos = files
-                .Where(f => Helper.GetFileDocType(Path.GetExtension(f)) == Helper.ConstStrings.Video)
-                .OrderBy(f => Path.GetFileName(f), StringComparer.OrdinalIgnoreCase)
-                .Take(MaxVideosToTry);
-            foreach (string video in videos)
+            // 動畫資料夾看影片，專輯看音樂檔（ID3／FLAC 內嵌的圖）
+            foreach (string kind in new[] { Helper.ConstStrings.Video, Helper.ConstStrings.Music })
             {
-                FolderCover cover = ReadEmbeddedCover(video);
-                if (cover != null)
+                IEnumerable<string> media = files
+                    .Where(f => Helper.GetFileDocType(Path.GetExtension(f)) == kind)
+                    .OrderBy(f => Path.GetFileName(f), StringComparer.OrdinalIgnoreCase)
+                    .Take(MaxVideosToTry);
+                foreach (string file in media)
                 {
-                    return cover;
+                    FolderCover cover = ReadEmbeddedCover(file, kind == Helper.ConstStrings.Music ? "歌曲" : "影片");
+                    if (cover != null)
+                    {
+                        return cover;
+                    }
                 }
             }
             return null;
@@ -93,7 +97,7 @@ namespace WhatSearch.Services
             }
         }
 
-        static FolderCover ReadEmbeddedCover(string videoFile)
+        static FolderCover ReadEmbeddedCover(string videoFile, string label)
         {
             try
             {
@@ -108,7 +112,7 @@ namespace WhatSearch.Services
                     {
                         byte[] data = pic.Data.Data;
                         string attach = string.IsNullOrEmpty(pic.Filename) ? string.Empty : "，附件 " + pic.Filename;
-                        return new FolderCover { Data = data, MimeType = SniffImageMime(data), Source = "影片內嵌封面：" + Path.GetFileName(videoFile) + attach };
+                        return new FolderCover { Data = data, MimeType = SniffImageMime(data), Source = label + "內嵌封面：" + Path.GetFileName(videoFile) + attach };
                     }
                 }
             }
@@ -124,7 +128,7 @@ namespace WhatSearch.Services
                 byte[] data = MatroskaSubtitleReader.ReadCoverAttachment(videoFile, out mime);
                 if (data != null && SniffImageMime(data) != null)
                 {
-                    return new FolderCover { Data = data, MimeType = SniffImageMime(data), Source = "影片內嵌封面（MKV 附件）：" + Path.GetFileName(videoFile) };
+                    return new FolderCover { Data = data, MimeType = SniffImageMime(data), Source = label + "內嵌封面（MKV 附件）：" + Path.GetFileName(videoFile) };
                 }
             }
             return null;
