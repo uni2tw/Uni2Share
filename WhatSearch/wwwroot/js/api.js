@@ -69,8 +69,8 @@ api.coverInfo = function(id) {
     return axios.get('/api/coverinfo', { params: { id: id } });
 }
 
-api.coverCandidates = function(id, q) {
-    return axios.get('/api/covercandidates', { params: { id: id, q: q } });
+api.coverCandidates = function(id, q, artist) {
+    return axios.get('/api/covercandidates', { params: { id: id, q: q, artist: artist || undefined } });
 }
 
 api.setCover = function(id, url) {

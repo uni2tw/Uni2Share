@@ -184,15 +184,15 @@ namespace WhatSearch.WebAPIs
         }
 
         /// <summary>
-        /// 動畫資料夾的封面圖（匯出評分圖用）：資料夾裡的 cover／folder 圖片檔，沒有就取前幾部影片內嵌的封面。
-        /// 只服務可評分的動畫資料夾；需要登入才能看的分享根，沒登入一律 404。沒有封面也是 404（前端改畫名稱色塊）。
+        /// 動畫資料夾的封面圖（匯出評分圖用）：資料夾裡的 cover／folder 圖片檔，沒有就取前幾部影片（專輯是音樂）內嵌的封面。
+        /// 只服務可評分的動畫資料夾與專輯頁；需要登入才能看的分享根，沒登入一律 404。沒有封面也是 404（前端改畫名稱色塊）。
         /// </summary>
         [HttpGet]
         [Route("api/foldercover")]
         public dynamic FolderCover([FromQuery] string id)
         {
             string folderPath = string.IsNullOrEmpty(id) ? string.Empty : fimgr.GetPath(id);
-            if (string.IsNullOrEmpty(folderPath) || Directory.Exists(folderPath) == false || ratingService.IsRateable(folderPath) == false)
+            if (string.IsNullOrEmpty(folderPath) || Directory.Exists(folderPath) == false || IsCoverFolder(id, folderPath) == false)
             {
                 return NotFound();
             }
@@ -476,7 +476,7 @@ namespace WhatSearch.WebAPIs
                 return StatusCode(403);
             }
             string folderPath = string.IsNullOrEmpty(id) ? string.Empty : fimgr.GetPath(id);
-            if (string.IsNullOrEmpty(folderPath) || Directory.Exists(folderPath) == false || ratingService.IsRateable(folderPath) == false)
+            if (string.IsNullOrEmpty(folderPath) || Directory.Exists(folderPath) == false || IsCoverFolder(id, folderPath) == false)
             {
                 return NotFound();
             }
@@ -486,19 +486,21 @@ namespace WhatSearch.WebAPIs
         }
 
         /// <summary>
-        /// 管理者幫動畫資料夾找封面：用名稱同時到 AniList 與 Bangumi 搜尋，回傳候選封面（縮圖與大圖網址）。只限可評分的動畫資料夾。
+        /// 管理者幫動畫資料夾或專輯頁找封面：動畫用名稱到 AniList、Bangumi、Kitsu 搜尋，專輯用專輯名稱與演出者到 iTunes、Deezer 搜尋，
+        /// 回傳候選封面（縮圖與大圖網址）。只限可評分的動畫資料夾與專輯頁。
         /// </summary>
         [HttpGet]
         [Route("api/covercandidates")]
         [UserAuthorize]
-        public async Task<IActionResult> CoverCandidates([FromQuery] string id, [FromQuery] string q)
+        public async Task<IActionResult> CoverCandidates([FromQuery] string id, [FromQuery] string q, [FromQuery] string artist)
         {
             if (User.IsInRole("Admin") == false)
             {
                 return StatusCode(403);
             }
             string keyword = (q ?? string.Empty).Trim();
-            if (string.IsNullOrEmpty(id) || keyword.Length == 0 || keyword.Length > 100)
+            string artistName = (artist ?? string.Empty).Trim();
+            if (string.IsNullOrEmpty(id) || keyword.Length == 0 || keyword.Length > 100 || artistName.Length > 100)
             {
                 return BadRequest("參數錯誤");
             }
@@ -507,13 +509,16 @@ namespace WhatSearch.WebAPIs
             {
                 return NotFound("找不到這個資料夾");
             }
-            if (ratingService.IsRateable(folderPath) == false)
+            if (IsCoverFolder(id, folderPath) == false)
             {
                 return BadRequest("這個資料夾不支援更換封面");
             }
             try
             {
-                CoverSearchResult result = await Ioc.Get<ICoverSearchService>().SearchAsync(keyword);
+                // 動畫資料夾搜動畫來源；專輯頁搜音樂來源（專輯名稱＋演出者）
+                CoverSearchResult result = ratingService.IsRateable(folderPath)
+                    ? await Ioc.Get<ICoverSearchService>().SearchAsync(keyword)
+                    : await Ioc.Get<ICoverSearchService>().SearchAlbumAsync(keyword, artistName);
                 return Ok(new
                 {
                     items = result.Items.Select(t => new { title = t.Title, sub_title = t.SubTitle, year = t.Year, format = t.Format, source = t.Source, thumb = t.Thumb, image = t.Image }),
@@ -528,7 +533,7 @@ namespace WhatSearch.WebAPIs
 
         /// <summary>
         /// 管理者把選定的候選封面存成資料夾裡的 cover.jpg（已有就覆蓋；先寫到系統暫存目錄再取代，失敗不會留下半張圖）。
-        /// 圖片網址只收 AniList、Bangumi 的圖片網域，且內容必須是 JPEG。
+        /// 圖片網址只收各搜尋來源的圖片網域，且內容必須是 JPEG。
         /// </summary>
         [HttpPost]
         [Route("api/coverset")]
@@ -548,7 +553,7 @@ namespace WhatSearch.WebAPIs
             {
                 return NotFound("找不到這個資料夾");
             }
-            if (ratingService.IsRateable(folderPath) == false)
+            if (IsCoverFolder(model.id, folderPath) == false)
             {
                 return BadRequest("這個資料夾不支援更換封面");
             }
@@ -811,6 +816,12 @@ namespace WhatSearch.WebAPIs
         }
 
         // 專輯頁：位在啟用專輯評分的分享根底下，而且資料夾裡有 2 首以上音樂（或是多片裝的母資料夾）
+        /// <summary>可以搜尋／更換封面的資料夾：動畫（可評分）或專輯頁</summary>
+        bool IsCoverFolder(string folderId, string folderPath)
+        {
+            return ratingService.IsRateable(folderPath) || IsAlbumFolder(folderId, folderPath);
+        }
+
         bool IsAlbumFolder(string folderId, string folderPath)
         {
             if (ratingService.IsAlbumShare(folderPath) == false || Directory.Exists(folderPath) == false)

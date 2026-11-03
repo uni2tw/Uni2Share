@@ -670,8 +670,10 @@
         </div>
         <div v-if="musicGridVisible" style="padding:10px 5px 0;">
             <div style="display:flex; gap:14px; align-items:flex-start;">
-                <div v-if="videoCoverUrl" style="flex:0 0 auto; width:130px;">
-                    <img :src="videoCoverUrl" style="width:100%; aspect-ratio:1/1; object-fit:cover; border-radius:6px; display:block;" />
+                <div v-if="videoCoverUrl || canEditCover" class="cover-wrap" style="flex:0 0 auto; width:130px; position:relative;">
+                    <img v-if="videoCoverUrl" :src="videoCoverUrl" style="width:100%; aspect-ratio:1/1; object-fit:cover; border-radius:6px; display:block;" />
+                    <div v-else style="width:100%; aspect-ratio:1/1; border:1px dashed #aaa; border-radius:6px; display:flex; align-items:center; justify-content:center; color:#999; font-size:13px;">沒有封面</div>
+                    <button v-if="canEditCover" type="button" class="btn btn-sm btn-dark" :class="{'cover-edit-btn': videoCoverUrl}" style="position:absolute; right:6px; bottom:6px; padding:1px 8px;" title="搜尋並更換封面" v-on:click="vm_openCoverEdit()"><i class="fa fa-image"></i> 改圖</button>
                 </div>
                 <div style="flex:1; min-width:0;">
                     <div style="font-size:1.2rem; font-weight:bold; word-break:break-all;">{{ musicFolder.title }}</div>
@@ -1008,28 +1010,32 @@
                 <button type="button" class="btn btn-sm btn-outline-secondary" v-on:click="vm_closeCoverEdit()"><i class="fa fa-times"></i></button>
             </div>
             <div style="display:flex; gap:10px; align-items:center; margin-bottom:10px; padding:8px; background:#f5f6f8; border-radius:6px;">
-                <img v-if="coverEdit.current" :src="coverEdit.current" v-on:load="coverEdit.currentSize = $event.target.naturalWidth + '×' + $event.target.naturalHeight" style="width:56px; aspect-ratio:2/3; object-fit:cover; border-radius:4px; flex:0 0 auto; background:#ddd;" />
-                <div v-else style="width:56px; aspect-ratio:2/3; border:1px dashed #aaa; border-radius:4px; flex:0 0 auto; display:flex; align-items:center; justify-content:center; color:#999; font-size:11px; text-align:center;">沒有</div>
+                <img v-if="coverEdit.current" :src="coverEdit.current" v-on:load="coverEdit.currentSize = $event.target.naturalWidth + '×' + $event.target.naturalHeight" :style="{aspectRatio: coverEdit.isAlbum ? '1/1' : '2/3'}" style="width:56px; object-fit:cover; border-radius:4px; flex:0 0 auto; background:#ddd;" />
+                <div v-else :style="{aspectRatio: coverEdit.isAlbum ? '1/1' : '2/3'}" style="width:56px; border:1px dashed #aaa; border-radius:4px; flex:0 0 auto; display:flex; align-items:center; justify-content:center; color:#999; font-size:11px; text-align:center;">沒有</div>
                 <div style="font-size:13px; min-width:0;">
                     <div style="font-weight:bold;">目前的封面</div>
                     <div v-if="coverEdit.currentLoading" style="color:#888;">讀取中…</div>
                     <div v-else-if="coverEdit.current" style="color:#555; word-break:break-all;">{{ coverEdit.currentSource }}<span v-if="coverEdit.currentSize" style="color:#888;">（{{ coverEdit.currentSize }}）</span></div>
+                    <div v-else-if="coverEdit.isAlbum" style="color:#888;">沒有封面檔（資料夾裡沒有 cover／folder 圖片，歌曲也沒有內嵌封面）。</div>
                     <div v-else style="color:#888;">沒有封面檔（資料夾裡沒有 cover／folder 圖片，影片也沒有內嵌封面）。頁面上若有圖，是從影片擷取的畫面。</div>
                 </div>
             </div>
             <form style="display:flex; gap:6px;" v-on:submit.prevent="vm_searchCover()">
-                <input type="text" class="form-control form-control-sm" v-model="coverEdit.keyword" maxlength="100" placeholder="作品名稱（中文查不到時改日文或英文）" />
+                <input type="text" class="form-control form-control-sm" v-model="coverEdit.keyword" maxlength="100" :placeholder="coverEdit.isAlbum ? '專輯名稱' : '作品名稱（中文查不到時改日文或英文）'" />
+                <input v-if="coverEdit.isAlbum" type="text" class="form-control form-control-sm" v-model="coverEdit.artist" maxlength="100" placeholder="演出者（可留白）" />
                 <button type="submit" class="btn btn-sm btn-primary" style="white-space:nowrap;" :disabled="coverEdit.loading || coverEdit.saving"><i class="fa fa-search"></i> 搜尋</button>
             </form>
-            <div style="font-size:12px; color:#888; margin:6px 0;">從 AniList、Bangumi（中文名稱比較查得到）與 Kitsu 找候選圖。選一張就會存成這個資料夾的 cover.jpg（已經有的會被覆蓋）。</div>
+            <div v-if="coverEdit.isAlbum" style="font-size:12px; color:#888; margin:6px 0;">從 iTunes 與 Deezer 找專輯封面候選。選一張就會存成這個資料夾的 cover.jpg（已經有的會被覆蓋）。</div>
+            <div v-else style="font-size:12px; color:#888; margin:6px 0;">從 AniList、Bangumi（中文名稱比較查得到）與 Kitsu 找候選圖。選一張就會存成這個資料夾的 cover.jpg（已經有的會被覆蓋）。</div>
             <div v-if="coverEdit.warning" style="color:#b26a00; font-size:12px; margin-bottom:6px;"><i class="fa fa-triangle-exclamation"></i> {{ coverEdit.warning }}</div>
             <div v-if="coverEdit.loading" style="color:#888; padding:14px 0;">搜尋中…</div>
             <div v-else-if="coverEdit.error" style="color:#dc3545; padding:8px 0; font-size:14px;">{{ coverEdit.error }}</div>
             <div v-else-if="coverEdit.searched && coverEdit.items.length === 0" style="color:#888; padding:8px 0; font-size:14px;">找不到，換個關鍵字試試</div>
             <div v-else style="display:grid; grid-template-columns:repeat(auto-fill, minmax(104px, 1fr)); gap:10px;">
                 <div v-for="(c, i) in coverEdit.items" :key="i" style="cursor:pointer; text-align:center;" v-on:click="vm_applyCover(c)">
-                    <img :src="c.thumb" referrerpolicy="no-referrer" loading="lazy" style="width:100%; aspect-ratio:2/3; object-fit:cover; border-radius:6px; display:block; background:#eee;" />
+                    <img :src="c.thumb" referrerpolicy="no-referrer" loading="lazy" :style="{aspectRatio: coverEdit.isAlbum ? '1/1' : '2/3'}" style="width:100%; object-fit:cover; border-radius:6px; display:block; background:#eee;" />
                     <div style="font-size:12px; line-height:1.3; margin-top:3px; word-break:break-all;">{{ c.title }}</div>
+                    <div v-if="coverEdit.isAlbum && c.sub_title" style="font-size:11px; color:#555; word-break:break-all;">{{ c.sub_title }}</div>
                     <div style="font-size:11px; color:#888;">{{ c.year || '' }} {{ c.format || '' }}</div>
                     <div style="font-size:10px; color:#999;">{{ c.source }}</div>
                 </div>
@@ -1571,7 +1577,7 @@
                 },
                 // 管理者在動畫資料夾裡可以更換封面
                 canEditCover: function() {
-                    return this.isAdmin && !!this.currentRating && this.currentRating.kind === 'anime';
+                    return this.isAdmin && !!this.currentRating && (this.currentRating.kind === 'anime' || this.currentRating.kind === 'album');
                 },
                 // 目前瀏覽的資料夾 id（麵包屑最後一層）；專輯的「收藏」就是收藏這個資料夾
                 currentFolderId: function() {
@@ -2377,7 +2383,13 @@
                     if (!this.canEditCover) {
                         return;
                     }
-                    let st = { folderId: this.currentRating.id, keyword: this.currentRating.name || '', loading: false, saving: false, searched: false, error: '', items: [],
+                    // 專輯頁用專輯標籤的專輯名稱與演出者當預設搜尋條件（沒有標籤就用資料夾名稱）
+                    let isAlbum = this.currentRating.kind === 'album';
+                    let mf = isAlbum ? this.musicFolder : null;
+                    let st = { folderId: this.currentRating.id, isAlbum: isAlbum,
+                        keyword: (mf && mf.title) || this.currentRating.name || '',
+                        artist: mf && mf.artist && mf.artist !== '多位演出者' ? mf.artist : '',
+                        loading: false, saving: false, searched: false, error: '', items: [],
                         current: '', currentSource: '', currentSize: '', currentLoading: true, warning: '' };
                     this.coverEdit = st;
                     api.coverInfo(st.folderId).then(res => {
@@ -2412,13 +2424,13 @@
                     }
                     let keyword = st.keyword.trim();
                     if (!keyword) {
-                        st.error = '請輸入作品名稱';
+                        st.error = st.isAlbum ? '請輸入專輯名稱' : '請輸入作品名稱';
                         return;
                     }
                     st.loading = true;
                     st.error = '';
                     st.warning = '';
-                    api.coverCandidates(st.folderId, keyword).then(res => {
+                    api.coverCandidates(st.folderId, keyword, st.isAlbum ? st.artist.trim() : '').then(res => {
                         st.items = res.data.items || [];
                         st.warning = (res.data.warnings || []).join('；');
                         st.searched = true;
