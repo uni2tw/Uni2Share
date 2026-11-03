@@ -486,7 +486,7 @@ namespace WhatSearch.WebAPIs
         }
 
         /// <summary>
-        /// 管理者幫動畫資料夾或專輯頁找封面：動畫用名稱到 AniList、Bangumi、Kitsu 搜尋，專輯用專輯名稱與演出者到 iTunes、Deezer 搜尋，
+        /// 管理者幫動畫資料夾或專輯頁找封面：動畫用名稱到 AniList、Bangumi、Kitsu 搜尋，專輯用專輯名稱與演出者到 iTunes、MusicBrainz 搜尋，
         /// 回傳候選封面（縮圖與大圖網址）。只限可評分的動畫資料夾與專輯頁。
         /// </summary>
         [HttpGet]
