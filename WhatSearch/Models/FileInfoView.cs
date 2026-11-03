@@ -59,6 +59,9 @@ namespace WhatSearch.Models
         /// <summary>動畫資料夾被管理者標註為「無法播放」（只在有標註時為 true）</summary>
         [JsonPropertyName("unplayable")]
         public bool? Unplayable { get; set; }
+        /// <summary>檔案格式不在可開啟的清單內（點了只會得到 404）；前端據此直接跳訊息，不開新分頁。只在不支援時為 true</summary>
+        [JsonPropertyName("unsupported")]
+        public bool? Unsupported { get; set; }
         /// <summary>音量平衡：這首歌量測出的響度（LUFS）；尚未分析或無法分析為 null</summary>
         [JsonPropertyName("loudness")]
         public double? Loudness { get; set; }

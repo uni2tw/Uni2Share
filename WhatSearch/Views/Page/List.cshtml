@@ -975,7 +975,19 @@
         </div>
     </div>
 
-    <div class="lightbox-overlay" v-if="tierPreview" v-on:mousedown="vm_overlayDown($event)" v-on:click.self="vm_overlayClick() && vm_closeTierPreview()">
+    <div class="lightbox-overlay" v-if="noticeDialog" v-on:mousedown="vm_overlayDown($event)" v-on:click.self="vm_overlayClick() && (noticeDialog = null)">
+        <div class="lightbox-overlay-content" style="background:#fff; color:#222; border-radius:8px; padding:14px 16px; max-width:420px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                <div style="font-weight:bold;">{{ noticeDialog.title }}</div>
+                <button type="button" class="btn btn-sm btn-outline-secondary" v-on:click="noticeDialog = null"><i class="fa fa-times"></i></button>
+            </div>
+            <div style="font-size:13px; color:#888; word-break:break-all; margin-bottom:6px;">{{ noticeDialog.name }}</div>
+            <div style="margin-bottom:12px;">{{ noticeDialog.text }}</div>
+            <div style="text-align:right;"><button type="button" class="btn btn-primary" v-on:click="noticeDialog = null">知道了</button></div>
+        </div>
+    </div>
+
+    <div class="lightbox-overlay" v-if="tierPreview"v-on:mousedown="vm_overlayDown($event)" v-on:click.self="vm_overlayClick() && vm_closeTierPreview()">
         <div class="lightbox-overlay-content" style="background:#fff; color:#222; border-radius:8px; padding:12px 14px; max-height:94vh; overflow:auto;">
             <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; margin-bottom:8px;">
                 <div style="font-weight:bold;">評分圖（{{ tierPreview.count }} 部）</div>
@@ -1155,6 +1167,7 @@
                     ratingFilter: 'all',
                     copyMsg: '',
                     copyDialog: null,
+                    noticeDialog: null,
                     tierBusy: false,
                     tierProgress: '',
                     tierPreview: null,
@@ -2862,6 +2875,9 @@
                         } else if (item.type == 'text') {
                             console.log('preview text:' + item.get_url);
                             this.vm_previewText(item);
+                        } else if (item.unsupported) {
+                            this.setSelectedItem(item.id);
+                            this.noticeDialog = { title: '無法開啟這個檔案', text: '不支援 ' + (item.title.lastIndexOf('.') > 0 ? item.title.substring(item.title.lastIndexOf('.')) : '這種') + ' 格式的檔案，沒辦法在網頁上開啟。', name: item.title };
                         } else {
                             console.log('open file:' + item.get_url);
                             window.open(item.get_url, '_blank');

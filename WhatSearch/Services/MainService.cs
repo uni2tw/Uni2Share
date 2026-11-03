@@ -75,6 +75,12 @@ namespace WhatSearch.Services
                     Bytes = subFileInfo.Length
                 };
                 ApplyMusicTags(fileView, subFileInfo.FullName);
+                if (fileView.Type != Helper.ConstStrings.Video && fileView.Type != Helper.ConstStrings.Music &&
+                    fileView.Type != Helper.ConstStrings.Image && fileView.Type != Helper.ConstStrings.Text &&
+                    config.PlayTypes.Contains(subFileInfo.Extension) == false)
+                {
+                    fileView.Unsupported = true;
+                }
                 if (fileView.Type == Helper.ConstStrings.Video)
                 {
                     videoJobs.Add(Tuple.Create(fileView, subFileInfo));
