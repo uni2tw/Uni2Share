@@ -49,12 +49,12 @@ namespace WhatSearch.Services
         Task<CoverSearchResult> SearchAsync(string keyword);
 
         /// <summary>
-        /// 同時到 iTunes（台灣、美國、日本商店）與 Deezer 搜尋專輯封面（都是方形大圖）；有演出者就一起查、一起算相關度。
+        /// 同時到 iTunes（台灣、美國、日本商店）與 MusicBrainz／Cover Art Archive 搜尋專輯封面（都是方形大圖）；有演出者就一起查、一起算相關度。
         /// 失敗處理與 SearchAsync 相同。
         /// </summary>
         Task<CoverSearchResult> SearchAlbumAsync(string album, string artist);
 
-        /// <summary>這個網址是不是可以由伺服器下載的封面來源（只收 AniList、Bangumi、Kitsu、iTunes、Deezer 圖片網域的 https）</summary>
+        /// <summary>這個網址是不是可以由伺服器下載的封面來源（只收 AniList、Bangumi、Kitsu、iTunes、Cover Art Archive 圖片網域的 https）</summary>
         bool IsAllowedImageUrl(string url);
 
         /// <summary>下載候選封面；只收 JPEG、最大 8 MB，不符合會丟出 InvalidOperationException（訊息可直接顯示）</summary>
@@ -67,7 +67,10 @@ namespace WhatSearch.Services
         const string BangumiApiUrl = "https://api.bgm.tv/v0/search/subjects?limit=10";
         const string KitsuApiUrl = "https://kitsu.io/api/edge/anime?filter%5Btext%5D=";
         const string ITunesApiUrl = "https://itunes.apple.com/search?media=music&entity=album&limit=12&country=";
-        const string DeezerApiUrl = "https://api.deezer.com/search/album?limit=12&q=";
+        const string MusicBrainzApiUrl = "https://musicbrainz.org/ws/2/release-group/?fmt=json&limit=8&query=";
+        const string CoverArtArchiveUrl = "https://coverartarchive.org/release-group/";
+        // MusicBrainz 搜到的專輯不一定有封面，只檢查相關度最高的前幾筆
+        const int MusicBrainzProbeMax = 6;
         // 台灣商店中文專輯最全，美國商店歐美最全，日本商店補日系專輯
         static readonly string[] ITunesCountries = { "TW", "US", "JP" };
         const int MaxImageBytes = 8 * 1024 * 1024;
@@ -542,13 +545,13 @@ namespace WhatSearch.Services
         {
             string term = string.IsNullOrWhiteSpace(artist) ? album : artist.Trim() + " " + album;
             List<Task<List<CoverCandidate>>> iTunesTasks = ITunesCountries.Select(c => SearchITunesAsync(term, c)).ToList();
-            Task<List<CoverCandidate>> deezerTask = SearchDeezerAsync(term);
-            try { await Task.WhenAll(iTunesTasks.Cast<Task>().Concat(new Task[] { deezerTask })); } catch (Exception) { /* 個別結果在下面處理 */ }
+            Task<List<CoverCandidate>> brainzTask = SearchMusicBrainzAsync(album, artist);
+            try { await Task.WhenAll(iTunesTasks.Cast<Task>().Concat(new Task[] { brainzTask })); } catch (Exception) { /* 個別結果在下面處理 */ }
 
             CoverSearchResult result = new CoverSearchResult();
             List<CoverCandidate> iTunes = CollectMany("iTunes", iTunesTasks, result);
-            List<CoverCandidate> deezer = CollectMany("Deezer", new List<Task<List<CoverCandidate>>> { deezerTask }, result);
-            if (iTunes == null && deezer == null)
+            List<CoverCandidate> brainz = CollectMany("MusicBrainz", new List<Task<List<CoverCandidate>>> { brainzTask }, result);
+            if (iTunes == null && brainz == null)
             {
                 throw new InvalidOperationException(string.Join("；", result.Warnings));
             }
@@ -556,7 +559,7 @@ namespace WhatSearch.Services
             // 專輯名稱是主要依據（7 成），有演出者再加上演出者的相符程度（3 成）
             string nAlbum = Normalize(album);
             string nArtist = Normalize(artist);
-            List<CoverCandidate> all = (iTunes ?? new List<CoverCandidate>()).Concat(deezer ?? new List<CoverCandidate>()).ToList();
+            List<CoverCandidate> all = (iTunes ?? new List<CoverCandidate>()).Concat(brainz ?? new List<CoverCandidate>()).ToList();
             foreach (CoverCandidate c in all)
             {
                 double albumScore = nAlbum.Length == 0 ? 0 : BestSimilarity(nAlbum, c.Names);
@@ -579,7 +582,7 @@ namespace WhatSearch.Services
                 using (HttpResponseMessage res = await http.GetAsync(url))
                 {
                     string json = await res.Content.ReadAsStringAsync();
-                    if (res.StatusCode == (HttpStatusCode)429 || res.StatusCode == HttpStatusCode.Forbidden)
+                    if (res.StatusCode == (HttpStatusCode)429 || res.StatusCode == HttpStatusCode.Forbidden || res.StatusCode == HttpStatusCode.ServiceUnavailable)
                     {
                         throw new InvalidOperationException(name + " 要求稍後再試，請等一下再搜尋");
                     }
@@ -646,59 +649,86 @@ namespace WhatSearch.Services
             return list;
         }
 
-        async Task<List<CoverCandidate>> SearchDeezerAsync(string term)
+        // MusicBrainz 查專輯（release group），再到 Cover Art Archive 確認有沒有封面；有才列出
+        async Task<List<CoverCandidate>> SearchMusicBrainzAsync(string album, string artist)
         {
-            string json = await GetJsonAsync(DeezerApiUrl + Uri.EscapeDataString(term), "Deezer");
-            List<CoverCandidate> list = new List<CoverCandidate>();
+            string query = "releasegroup:\"" + EscapeLucene(album) + "\"";
+            if (string.IsNullOrWhiteSpace(artist) == false)
+            {
+                query += " AND artist:\"" + EscapeLucene(artist.Trim()) + "\"";
+            }
+            string json = await GetJsonAsync(MusicBrainzApiUrl + Uri.EscapeDataString(query), "MusicBrainz");
+            List<(string Id, CoverCandidate Item)> found = new List<(string, CoverCandidate)>();
             try
             {
                 using (JsonDocument doc = JsonDocument.Parse(json))
                 {
-                    // 超過用量上限之類的錯誤，Deezer 也是回 200，內容是 error 物件
-                    if (doc.RootElement.TryGetProperty("error", out JsonElement error))
+                    foreach (JsonElement m in doc.RootElement.GetProperty("release-groups").EnumerateArray())
                     {
-                        throw new InvalidOperationException("Deezer 暫時無法使用（" + (GetString(error, "message") ?? "錯誤") + "）");
-                    }
-                    JsonElement data = doc.RootElement.GetProperty("data");
-                    // 有些網路環境（地區限制）下，Deezer 回報有 N 筆卻給空清單；這不是「沒有結果」，要讓使用者知道
-                    if (data.GetArrayLength() == 0 && doc.RootElement.TryGetProperty("total", out JsonElement total) && total.ValueKind == JsonValueKind.Number && total.GetInt32() > 0)
-                    {
-                        throw new InvalidOperationException("Deezer 沒有回傳內容（這個網路環境可能被限制）");
-                    }
-                    foreach (JsonElement m in data.EnumerateArray())
-                    {
+                        string id = GetString(m, "id");
                         string name = GetString(m, "title");
-                        string image = GetString(m, "cover_xl");
-                        string thumb = GetString(m, "cover_medium");
-                        // 沒有封面的專輯，圖片網址路徑裡的雜湊是空的（…/cover//1000x1000…）
-                        if (name == null || image == null || image.Contains("/cover//") || IsAllowedImageUrl(image) == false)
+                        if (id == null || name == null || Guid.TryParse(id, out _) == false)
                         {
                             continue;
                         }
-                        string artist = m.TryGetProperty("artist", out JsonElement a) && a.ValueKind == JsonValueKind.Object ? GetString(a, "name") : null;
-                        string type = GetString(m, "record_type");
-                        list.Add(new CoverCandidate
+                        StringBuilder artistName = new StringBuilder();
+                        if (m.TryGetProperty("artist-credit", out JsonElement credits) && credits.ValueKind == JsonValueKind.Array)
+                        {
+                            foreach (JsonElement c in credits.EnumerateArray())
+                            {
+                                artistName.Append(GetString(c, "name")).Append(GetString(c, "joinphrase"));
+                            }
+                        }
+                        string date = GetString(m, "first-release-date");
+                        int year;
+                        int? y = date != null && date.Length >= 4 && int.TryParse(date.Substring(0, 4), out year) ? year : (int?)null;
+                        string type = GetString(m, "primary-type");
+                        found.Add((id, new CoverCandidate
                         {
                             Title = name,
-                            SubTitle = artist,
+                            SubTitle = artistName.Length == 0 ? null : artistName.ToString(),
+                            Year = y,
                             Format = type == null ? null : type.ToUpperInvariant(),
-                            Source = "Deezer",
+                            Source = "MusicBrainz",
                             Names = new List<string> { name },
-                            Thumb = IsAllowedImageUrl(thumb) ? thumb : image,
-                            Image = image
-                        });
+                            Thumb = CoverArtArchiveUrl + id + "/front-250",
+                            Image = CoverArtArchiveUrl + id + "/front-1200"
+                        }));
                     }
                 }
             }
-            catch (InvalidOperationException)
+            catch (Exception)
             {
-                throw;
+                throw new InvalidOperationException("MusicBrainz 回傳的資料看不懂");
+            }
+
+            // 有沒有封面要問 Cover Art Archive（有封面會回轉址 3xx，沒有是 404）
+            List<(string Id, CoverCandidate Item)> top = found.Take(MusicBrainzProbeMax).ToList();
+            bool[] hasArt = await Task.WhenAll(top.Select(t => HasCoverArtAsync(t.Item.Thumb)));
+            return top.Where((t, i) => hasArt[i]).Select(t => t.Item).ToList();
+        }
+
+        async Task<bool> HasCoverArtAsync(string url)
+        {
+            try
+            {
+                using (HttpRequestMessage req = new HttpRequestMessage(HttpMethod.Head, url))
+                using (HttpResponseMessage res = await http.SendAsync(req))
+                {
+                    int code = (int)res.StatusCode;
+                    return code >= 300 && code < 400;
+                }
             }
             catch (Exception)
             {
-                throw new InvalidOperationException("Deezer 回傳的資料看不懂");
+                return false;
             }
-            return list;
+        }
+
+        // Lucene 查詢字串裡，雙引號與反斜線要跳脫
+        static string EscapeLucene(string text)
+        {
+            return text.Replace("\\", "\\\\").Replace("\"", "\\\"");
         }
 
         static string GetString(JsonElement e, string name)
@@ -725,7 +755,9 @@ namespace WhatSearch.Services
                     || uri.Host.EndsWith(".kitsu.app", StringComparison.OrdinalIgnoreCase)
                     || uri.Host.EndsWith(".kitsu.io", StringComparison.OrdinalIgnoreCase)
                     || uri.Host.EndsWith(".mzstatic.com", StringComparison.OrdinalIgnoreCase)
-                    || uri.Host.EndsWith(".dzcdn.net", StringComparison.OrdinalIgnoreCase));
+                    || uri.Host.Equals("coverartarchive.org", StringComparison.OrdinalIgnoreCase)
+                    || uri.Host.Equals("archive.org", StringComparison.OrdinalIgnoreCase)
+                    || uri.Host.EndsWith(".archive.org", StringComparison.OrdinalIgnoreCase));
         }
 
         public async Task<byte[]> DownloadJpegAsync(string url)
@@ -737,7 +769,26 @@ namespace WhatSearch.Services
             byte[] data;
             try
             {
-                using (HttpResponseMessage res = await http.GetAsync(url, HttpCompletionOption.ResponseHeadersRead))
+                // 自己跟著轉址（Cover Art Archive 會轉到 archive.org），每一跳都要通過白名單
+                string current = url;
+                HttpResponseMessage first = null;
+                for (int hop = 0; ; hop++)
+                {
+                    first = await http.GetAsync(current, HttpCompletionOption.ResponseHeadersRead);
+                    int code = (int)first.StatusCode;
+                    if (code < 300 || code >= 400)
+                    {
+                        break;
+                    }
+                    Uri next = first.Headers.Location == null ? null : new Uri(new Uri(current), first.Headers.Location);
+                    first.Dispose();
+                    if (hop >= 5 || next == null || IsAllowedImageUrl(next.AbsoluteUri) == false)
+                    {
+                        throw new InvalidOperationException("不支援的圖片來源");
+                    }
+                    current = next.AbsoluteUri;
+                }
+                using (HttpResponseMessage res = first)
                 {
                     if (res.IsSuccessStatusCode == false)
                     {
