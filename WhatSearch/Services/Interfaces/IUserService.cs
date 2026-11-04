@@ -25,6 +25,8 @@ namespace WhatSearch.Services.Interfaces
         Member GetMember(string name);
         List<Member> GetMembers();
         bool Register(string name, string displayName, string password, out string message);
+        /// <summary>管理者新增會員：身分由管理者指定，密碼存成雜湊；帳號重複、密碼空白或太長、顯示名稱不合規定時回傳 false，message 是原因</summary>
+        bool AddMember(string name, string displayName, string password, MemberRole role, out string message);
         bool Login(HttpResponse response, string name, string password, int cookieDays, out string message);
     }
 }

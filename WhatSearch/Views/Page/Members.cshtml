@@ -13,6 +13,8 @@
                     return {
                         // 重設密碼對話框：member 是要重設的會員；password 是要設定的新密碼；done 表示已重設成功（這時還看得到密碼，方便複製）
                         reset: null,
+                        // 新增會員對話框：done 表示已建立成功（這時還看得到密碼，方便複製）
+                        adding: null,
                         // role：下拉選單目前選的身分；savedRole：已儲存的身分（兩者不同就是「尚未儲存」）
                         // 載入時排序：待啟用的在最上面（管理者進這頁多半是為了批准新會員），其次管理者，最後一般會員；之後儲存不會重新排序
                         members: JSON.parse(@Html.SerializeJson((object)Model)).map(function (m, i) {
@@ -103,21 +105,92 @@
                     },
                     // 網站常是 HTTP，瀏覽器的一鍵複製 API 只在 HTTPS 可用，所以失敗時改用「選取＋複製指令」
                     vm_copyPassword: function () {
-                        var self = this;
-                        var text = self.reset ? self.reset.password : '';
+                        this.vm_copyInto(this.reset, '.reset-password-input');
+                    },
+                    // state 是對話框的狀態（要有 password、copied、copyFailed），selector 是顯示密碼的輸入框
+                    vm_copyInto: function (state, selector) {
+                        if (!state) {
+                            return;
+                        }
                         var fallback = function () {
-                            var el = document.querySelector('.reset-password-input');
+                            var el = document.querySelector(selector);
                             if (el) {
                                 el.focus();
                                 el.select();
-                                try { self.reset.copied = document.execCommand('copy'); } catch (e) { self.reset.copied = false; }
-                                self.reset.copyFailed = !self.reset.copied;
+                                try { state.copied = document.execCommand('copy'); } catch (e) { state.copied = false; }
+                                state.copyFailed = !state.copied;
                             }
                         };
                         if (navigator.clipboard && window.isSecureContext) {
-                            navigator.clipboard.writeText(text).then(function () { self.reset.copied = true; self.reset.copyFailed = false; }, fallback);
+                            navigator.clipboard.writeText(state.password).then(function () { state.copied = true; state.copyFailed = false; }, fallback);
                         } else {
                             fallback();
+                        }
+                    },
+                    // ----- 新增會員 -----
+                    vm_openAdd: function () {
+                        this.adding = { name: '', display: '', role: 'member', password: this.vm_randomPassword(), done: false, saving: false, error: '', copied: false, copyFailed: false };
+                        this.$nextTick(function () {
+                            var el = document.querySelector('.add-name-input');
+                            if (el) { el.focus(); }
+                        });
+                    },
+                    vm_closeAdd: function () {
+                        this.adding = null;
+                    },
+                    vm_addRegenerate: function () {
+                        if (this.adding && !this.adding.done) {
+                            this.adding.password = this.vm_randomPassword();
+                            this.adding.copied = false;
+                        }
+                    },
+                    vm_addCopy: function () {
+                        this.vm_copyInto(this.adding, '.add-password-input');
+                    },
+                    vm_submitAdd: function () {
+                        var self = this;
+                        var a = self.adding;
+                        if (!a || a.done || a.saving) {
+                            return;
+                        }
+                        if (!a.name || a.name.trim().length === 0) {
+                            a.error = '帳號不可空白';
+                            return;
+                        }
+                        if (!a.password || a.password.trim().length === 0) {
+                            a.error = '密碼不可空白';
+                            return;
+                        }
+                        a.error = '';
+                        a.saving = true;
+                        axios.post('/admin/addMember', { 'name': a.name, 'displayName': a.display, 'password': a.password, 'role': a.role }).then(function (res) {
+                            var data = res.data || {};
+                            if (data.success === 1 && data.member) {
+                                a.done = true;
+                                // 新會員放在列表最上面，方便看到
+                                var m = data.member;
+                                var role = Number(m.status) !== 1 ? 'pending' : (m.admin ? 'admin' : 'member');
+                                self.members.unshift(Object.assign({}, m, { role: role, savedRole: role, saving: false, order: -1 }));
+                                self.vm_showAlert(data.message || '已新增');
+                            } else {
+                                a.error = data.message || '新增失敗';
+                            }
+                        }).catch(function () {
+                            a.error = '新增失敗，請稍後再試';
+                        }).finally(function () {
+                            a.saving = false;
+                        });
+                    },
+                    vm_addKeydown: function (evt) {
+                        if (evt.key === 'Escape') {
+                            this.vm_closeAdd();
+                        } else if (evt.key === 'Enter' && evt.target.tagName !== 'SELECT') {
+                            evt.preventDefault();
+                            if (this.adding && this.adding.done) {
+                                this.vm_closeAdd();
+                            } else {
+                                this.vm_submitAdd();
+                            }
                         }
                     },
                     vm_submitReset: function () {
@@ -190,6 +263,7 @@
             <button type="button" class="btn btn-sm btn-info" v-on:click="vm_home()" title="回首頁"><i class="fa fa-home"></i></button>
             會員管理
             <span style="margin-left:auto; display:flex; gap:6px;">
+                <button type="button" class="btn btn-sm btn-primary" v-on:click="vm_openAdd()"><i class="fa fa-user-plus"></i> 新增會員</button>
                 <a href="/admin/monitor" class="btn btn-sm btn-outline-secondary"><i class="fa fa-chart-line"></i> 播放監控</a>
                 <a href="/admin/convert" class="btn btn-sm btn-outline-secondary"><i class="fa fa-film"></i> MKV 轉檔</a>
             </span>
@@ -238,6 +312,54 @@
                     </tr>
                 </tbody>
             </table>
+        </div>
+
+        <div v-if="adding" style="position:fixed; inset:0; background:rgba(0,0,0,0.45); z-index:2000; display:flex; align-items:center; justify-content:center; padding:16px;" v-on:click.self="vm_closeAdd()">
+            <div style="background:#fff; border-radius:12px; padding:20px; width:100%; max-width:420px;" v-on:keydown="vm_addKeydown">
+                <h2 class="h5" style="margin-bottom:12px;"><i class="fa fa-user-plus"></i> 新增會員</h2>
+                <div v-if="!adding.done">
+                    <label style="font-size:13px; color:#666;" for="add-name">帳號（登入用，建立後不能修改）</label>
+                    <input id="add-name" type="text" class="form-control add-name-input" v-model="adding.name" autocomplete="off" spellcheck="false" />
+                    <label style="font-size:13px; color:#666; margin-top:10px;" for="add-display">顯示名稱（選填，空白就用帳號；最多 20 字）</label>
+                    <input id="add-display" type="text" class="form-control" v-model="adding.display" autocomplete="off" maxlength="40" />
+                    <label style="font-size:13px; color:#666; margin-top:10px;" for="add-role">身分</label>
+                    <select id="add-role" class="form-select" v-model="adding.role">
+                        <option value="member">會員（直接啟用）</option>
+                        <option value="admin">管理者（直接啟用）</option>
+                        <option value="pending">待啟用（暫時不能登入）</option>
+                    </select>
+                    <label style="font-size:13px; color:#666; margin-top:10px;" for="add-password">密碼（已先產生一組隨機密碼，可以直接用，也可以自己改）</label>
+                    <div style="display:flex; gap:6px;">
+                        <input id="add-password" type="text" class="form-control add-password-input" v-model="adding.password" autocomplete="off" spellcheck="false" style="font-family:monospace;" />
+                        <button type="button" class="btn btn-outline-secondary" title="重新產生" v-on:click="vm_addRegenerate()"><i class="fa fa-dice"></i></button>
+                        <button type="button" class="btn btn-outline-secondary" title="複製" v-on:click="vm_addCopy()"><i class="fa fa-copy"></i></button>
+                    </div>
+                    <div v-if="adding.copied" style="font-size:12px; color:#198754; margin-top:4px;">已複製</div>
+                    <div v-if="adding.copyFailed" style="font-size:12px; color:#b26a00; margin-top:4px;">瀏覽器不允許自動複製：密碼已選取，請按 Ctrl+C（手機請長按複製）</div>
+                    <div v-if="adding.error" style="font-size:13px; color:#dc3545; margin-top:6px;">{{ adding.error }}</div>
+                    <div style="font-size:12px; color:#888; margin-top:8px;">建立後密碼只會顯示一次，請複製後再傳給對方；對方登入後可以自己改密碼。</div>
+                    <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:14px;">
+                        <button type="button" class="btn btn-outline-secondary" v-on:click="vm_closeAdd()">取消</button>
+                        <button type="button" class="btn btn-primary" :disabled="adding.saving" v-on:click="vm_submitAdd()"><i class="fa fa-user-plus"></i> 建立</button>
+                    </div>
+                </div>
+                <div v-else>
+                    <div style="font-size:14px; color:#198754;"><i class="fa fa-circle-check"></i> 已建立會員，請把帳號與密碼傳給對方：</div>
+                    <div style="font-size:13px; color:#666; margin-top:8px;">帳號</div>
+                    <input type="text" class="form-control" :value="adding.name" readonly style="font-family:monospace;" />
+                    <div style="font-size:13px; color:#666; margin-top:8px;">密碼</div>
+                    <div style="display:flex; gap:6px;">
+                        <input type="text" class="form-control add-password-input" :value="adding.password" readonly style="font-family:monospace;" />
+                        <button type="button" class="btn btn-outline-secondary" title="複製" v-on:click="vm_addCopy()"><i class="fa fa-copy"></i></button>
+                    </div>
+                    <div v-if="adding.copied" style="font-size:12px; color:#198754; margin-top:4px;">已複製</div>
+                    <div v-if="adding.copyFailed" style="font-size:12px; color:#b26a00; margin-top:4px;">瀏覽器不允許自動複製：密碼已選取，請按 Ctrl+C（手機請長按複製）</div>
+                    <div style="font-size:12px; color:#888; margin-top:8px;">關閉後就看不到這組密碼了。</div>
+                    <div style="display:flex; justify-content:flex-end; margin-top:14px;">
+                        <button type="button" class="btn btn-primary" v-on:click="vm_closeAdd()">完成</button>
+                    </div>
+                </div>
+            </div>
         </div>
 
         <div v-if="reset" style="position:fixed; inset:0; background:rgba(0,0,0,0.45); z-index:2000; display:flex; align-items:center; justify-content:center; padding:16px;" v-on:click.self="vm_closeReset()">
