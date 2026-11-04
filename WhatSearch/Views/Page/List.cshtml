@@ -2864,7 +2864,7 @@
                     if (item.type == 'folder') {
                         this.vm_getFolder(item.id, true);
                     } else {
-                        if ((item.type == 'music' || item.type == 'video') && this.isLoggedIn === false) {
+                        if (this.isLoggedIn === false) {
                             console.log('not logged in, redirect to login');
                             this.redirectToLogin(item.id);
                             return;

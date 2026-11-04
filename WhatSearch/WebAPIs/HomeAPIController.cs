@@ -197,7 +197,8 @@ namespace WhatSearch.WebAPIs
             {
                 return NotFound();
             }
-            if (User.Identity.IsAuthenticated == false && PathUtility.IsProtetedUrl(PathUtility.GetRelativePath(folderPath)))
+            // 和 /get/ 一樣，沒登入不給封面
+            if (User.Identity.IsAuthenticated == false)
             {
                 return NotFound();
             }
