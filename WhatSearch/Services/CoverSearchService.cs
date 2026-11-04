@@ -1,11 +1,16 @@
+using NLog;
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Net;
 using System.Net.Http;
+using System.Security.Authentication;
 using System.Text;
 using System.Text.Json;
+using System.Threading;
 using System.Threading.Tasks;
 using WhatSearch.Core;
 using WhatSearch.Services.Interfaces;
@@ -95,6 +100,11 @@ namespace WhatSearch.Services
   }
 }";
 
+        static readonly ILogger logger = LogManager.GetCurrentClassLogger();
+        // Bangumi 的 API 要求要有識別用的 User-Agent
+        const string UserAgent = "uni2tw-Uni2Share/1.0 (https://github.com/uni2tw/Uni2Share)";
+        const int TimeoutSeconds = 12;
+
         // 不自動跟著轉址，避免被導到允許網域以外的地方
         static readonly HttpClient http = CreateClient();
 
@@ -102,11 +112,248 @@ namespace WhatSearch.Services
         {
             HttpClient client = new HttpClient(new HttpClientHandler { AllowAutoRedirect = false })
             {
-                Timeout = TimeSpan.FromSeconds(12)
+                Timeout = TimeSpan.FromSeconds(TimeoutSeconds)
             };
-            // Bangumi 的 API 要求要有識別用的 User-Agent
-            client.DefaultRequestHeaders.UserAgent.ParseAdd("uni2tw-Uni2Share/1.0 (https://github.com/uni2tw/Uni2Share)");
+            client.DefaultRequestHeaders.UserAgent.ParseAdd(UserAgent);
             return client;
+        }
+
+        class FetchResult
+        {
+            public int Status { get; set; }
+            /// <summary>3xx 時的轉址目標（絕對網址）；沒有就是 null</summary>
+            public string Location { get; set; }
+            public byte[] Body { get; set; }
+            public bool IsSuccess { get { return Status >= 200 && Status < 300; } }
+            public string Text { get { return Body == null ? string.Empty : Encoding.UTF8.GetString(Body); } }
+        }
+
+        // 系統 TLS 握手失敗過的主機：之後直接走 curl，不再先試一次 HttpClient
+        static readonly ConcurrentDictionary<string, bool> curlHosts = new ConcurrentDictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
+
+        /// <summary>設定的 curl 路徑；沒設定或檔案不存在回傳 null（代表不使用 curl）</summary>
+        static string GetCurlPath()
+        {
+            string path = Ioc.GetConfig()?.CurlPath;
+            return string.IsNullOrWhiteSpace(path) || File.Exists(path) == false ? null : path;
+        }
+
+        /// <summary>
+        /// 送出請求並取回結果（不跟轉址）。先用 HttpClient；若是系統 TLS 握手失敗（舊版 Windows 常見）而且有設定 curl，就改用 curl 重送，並記住這個主機以後直接走 curl。
+        /// method 為 GET、HEAD 或 POST（POST 固定送 JSON）。
+        /// </summary>
+        async Task<FetchResult> FetchAsync(string method, string url, string accept = null, string jsonBody = null)
+        {
+            string host = new Uri(url).Host;
+            if (curlHosts.ContainsKey(host) && GetCurlPath() != null)
+            {
+                return await FetchByCurlAsync(method, url, accept, jsonBody);
+            }
+            try
+            {
+                return await FetchByHttpClientAsync(method, url, accept, jsonBody);
+            }
+            catch (Exception ex) when (IsTlsFailure(ex) && GetCurlPath() != null)
+            {
+                logger.Warn("系統 TLS 連不上 " + host + "（" + InnerMessage(ex) + "），改用 curl");
+                curlHosts[host] = true;
+                return await FetchByCurlAsync(method, url, accept, jsonBody);
+            }
+        }
+
+        static bool IsTlsFailure(Exception ex)
+        {
+            for (Exception e = ex; e != null; e = e.InnerException)
+            {
+                if (e is AuthenticationException)
+                {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        static string InnerMessage(Exception ex)
+        {
+            Exception inner = ex;
+            while (inner.InnerException != null)
+            {
+                inner = inner.InnerException;
+            }
+            return inner.Message;
+        }
+
+        /// <summary>連線失敗的說明；附上最內層的例外訊息，方便判斷是 TLS、DNS 還是逾時</summary>
+        static InvalidOperationException ConnectError(string name, Exception ex, string suffix = "")
+        {
+            return new InvalidOperationException("連不上 " + name + "（" + InnerMessage(ex) + "）" + suffix);
+        }
+
+        async Task<FetchResult> FetchByHttpClientAsync(string method, string url, string accept, string jsonBody)
+        {
+            using (HttpRequestMessage req = new HttpRequestMessage(new HttpMethod(method), url))
+            {
+                if (accept != null)
+                {
+                    req.Headers.Accept.ParseAdd(accept);
+                }
+                if (jsonBody != null)
+                {
+                    req.Content = new StringContent(jsonBody, Encoding.UTF8, "application/json");
+                }
+                using (HttpResponseMessage res = await http.SendAsync(req, HttpCompletionOption.ResponseHeadersRead))
+                {
+                    FetchResult result = new FetchResult { Status = (int)res.StatusCode, Body = new byte[0] };
+                    if (res.Headers.Location != null)
+                    {
+                        result.Location = new Uri(new Uri(url), res.Headers.Location).AbsoluteUri;
+                    }
+                    if (method == "HEAD")
+                    {
+                        return result;
+                    }
+                    if (res.Content.Headers.ContentLength > MaxImageBytes)
+                    {
+                        throw new InvalidOperationException("回應太大");
+                    }
+                    using (Stream s = await res.Content.ReadAsStreamAsync())
+                    using (MemoryStream ms = new MemoryStream())
+                    {
+                        byte[] buffer = new byte[81920];
+                        int n;
+                        while ((n = await s.ReadAsync(buffer, 0, buffer.Length)) > 0)
+                        {
+                            ms.Write(buffer, 0, n);
+                            if (ms.Length > MaxImageBytes)
+                            {
+                                throw new InvalidOperationException("回應太大");
+                            }
+                        }
+                        result.Body = ms.ToArray();
+                    }
+                    return result;
+                }
+            }
+        }
+
+        /// <summary>
+        /// 用外部 curl 取資料。網址只收 https 且用 --url 傳（不會被當成選項）；參數用陣列傳，不經過 shell；
+        /// POST 的內容從 stdin 送。狀態碼與轉址目標靠 -w 接在內容後面（"\n狀態碼\n轉址網址"）再切開。
+        /// </summary>
+        async Task<FetchResult> FetchByCurlAsync(string method, string url, string accept, string jsonBody)
+        {
+            string curl = GetCurlPath();
+            if (curl == null || url.StartsWith("https://", StringComparison.OrdinalIgnoreCase) == false)
+            {
+                throw new InvalidOperationException("無法使用 curl");
+            }
+            ProcessStartInfo psi = new ProcessStartInfo(curl)
+            {
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                RedirectStandardInput = jsonBody != null
+            };
+            foreach (string arg in new[] { "-sS", "--proto", "=https", "--tlsv1.2", "--max-time", TimeoutSeconds.ToString(),
+                "--max-filesize", MaxImageBytes.ToString(), "-A", UserAgent, "-w", "\n%{http_code}\n%{redirect_url}" })
+            {
+                psi.ArgumentList.Add(arg);
+            }
+            if (method == "HEAD")
+            {
+                psi.ArgumentList.Add("-I");
+            }
+            else if (jsonBody != null)
+            {
+                foreach (string arg in new[] { "-X", "POST", "-H", "Content-Type: application/json", "--data-binary", "@-" })
+                {
+                    psi.ArgumentList.Add(arg);
+                }
+            }
+            if (accept != null)
+            {
+                psi.ArgumentList.Add("-H");
+                psi.ArgumentList.Add("Accept: " + accept);
+            }
+            psi.ArgumentList.Add("--url");
+            psi.ArgumentList.Add(url);
+
+            using (Process p = Process.Start(psi))
+            using (CancellationTokenSource cts = new CancellationTokenSource(TimeSpan.FromSeconds(TimeoutSeconds + 3)))
+            {
+                try
+                {
+                    if (jsonBody != null)
+                    {
+                        byte[] input = Encoding.UTF8.GetBytes(jsonBody);
+                        await p.StandardInput.BaseStream.WriteAsync(input, 0, input.Length, cts.Token);
+                        p.StandardInput.Close();
+                    }
+                    Task<byte[]> outTask = ReadCappedAsync(p.StandardOutput.BaseStream, MaxImageBytes + 1024, cts.Token);
+                    Task<string> errTask = p.StandardError.ReadToEndAsync();
+                    byte[] output = await outTask;
+                    await p.WaitForExitAsync(cts.Token);
+                    string err = (await errTask).Trim();
+                    if (p.ExitCode == 63)
+                    {
+                        throw new InvalidOperationException("回應太大");
+                    }
+                    if (p.ExitCode != 0)
+                    {
+                        throw new HttpRequestException("curl 失敗（" + p.ExitCode + "）：" + err);
+                    }
+                    return ParseCurlOutput(output);
+                }
+                catch (OperationCanceledException)
+                {
+                    try { p.Kill(); } catch (Exception) { }
+                    throw new TimeoutException("curl 逾時");
+                }
+                catch (Exception)
+                {
+                    try { if (p.HasExited == false) { p.Kill(); } } catch (Exception) { }
+                    throw;
+                }
+            }
+        }
+
+        static async Task<byte[]> ReadCappedAsync(Stream s, int cap, CancellationToken token)
+        {
+            using (MemoryStream ms = new MemoryStream())
+            {
+                byte[] buffer = new byte[81920];
+                int n;
+                while ((n = await s.ReadAsync(buffer, 0, buffer.Length, token)) > 0)
+                {
+                    ms.Write(buffer, 0, n);
+                    if (ms.Length > cap)
+                    {
+                        throw new InvalidOperationException("回應太大");
+                    }
+                }
+                return ms.ToArray();
+            }
+        }
+
+        // 輸出結尾是 "\n狀態碼\n轉址網址"（轉址網址可能是空的）；從後面往前切
+        static FetchResult ParseCurlOutput(byte[] output)
+        {
+            int last = Array.LastIndexOf(output, (byte)'\n');
+            int prev = last > 0 ? Array.LastIndexOf(output, (byte)'\n', last - 1) : -1;
+            if (prev < 0)
+            {
+                throw new InvalidOperationException("curl 回傳的資料看不懂");
+            }
+            string redirect = Encoding.UTF8.GetString(output, last + 1, output.Length - last - 1).Trim();
+            string code = Encoding.UTF8.GetString(output, prev + 1, last - prev - 1).Trim();
+            if (int.TryParse(code, out int status) == false)
+            {
+                throw new InvalidOperationException("curl 回傳的資料看不懂");
+            }
+            byte[] body = new byte[prev];
+            Array.Copy(output, body, prev);
+            return new FetchResult { Status = status, Location = redirect.Length == 0 ? null : redirect, Body = body };
         }
 
         public async Task<CoverSearchResult> SearchAsync(string keyword)
@@ -316,26 +563,20 @@ namespace WhatSearch.Services
             string json;
             try
             {
-                using (HttpRequestMessage req = new HttpRequestMessage(HttpMethod.Get, url))
+                FetchResult res = await FetchAsync("GET", url, accept: "application/vnd.api+json");
+                json = res.Text;
+                if (res.IsSuccess == false)
                 {
-                    req.Headers.Accept.ParseAdd("application/vnd.api+json");
-                    using (HttpResponseMessage res = await http.SendAsync(req))
-                    {
-                        json = await res.Content.ReadAsStringAsync();
-                        if (res.IsSuccessStatusCode == false)
-                        {
-                            throw new InvalidOperationException("Kitsu 回應錯誤（" + (int)res.StatusCode + "）");
-                        }
-                    }
+                    throw new InvalidOperationException("Kitsu 回應錯誤（" + res.Status + "）");
                 }
             }
             catch (InvalidOperationException)
             {
                 throw;
             }
-            catch (Exception)
+            catch (Exception ex)
             {
-                throw new InvalidOperationException("連不上 Kitsu");
+                throw ConnectError("Kitsu", ex);
             }
 
             List<CoverCandidate> list = new List<CoverCandidate>();
@@ -413,22 +654,20 @@ namespace WhatSearch.Services
             string json;
             try
             {
-                using (HttpResponseMessage res = await http.PostAsync(BangumiApiUrl, new StringContent(body, Encoding.UTF8, "application/json")))
+                FetchResult res = await FetchAsync("POST", BangumiApiUrl, jsonBody: body);
+                json = res.Text;
+                if (res.IsSuccess == false)
                 {
-                    json = await res.Content.ReadAsStringAsync();
-                    if (res.IsSuccessStatusCode == false)
-                    {
-                        throw new InvalidOperationException("Bangumi 回應錯誤（" + (int)res.StatusCode + "）");
-                    }
+                    throw new InvalidOperationException("Bangumi 回應錯誤（" + res.Status + "）");
                 }
             }
             catch (InvalidOperationException)
             {
                 throw;
             }
-            catch (Exception)
+            catch (Exception ex)
             {
-                throw new InvalidOperationException("連不上 Bangumi");
+                throw ConnectError("Bangumi", ex);
             }
 
             List<CoverCandidate> list = new List<CoverCandidate>();
@@ -479,26 +718,24 @@ namespace WhatSearch.Services
             string json;
             try
             {
-                using (HttpResponseMessage res = await http.PostAsync(ApiUrl, new StringContent(body, Encoding.UTF8, "application/json")))
+                FetchResult res = await FetchAsync("POST", ApiUrl, jsonBody: body);
+                json = res.Text;
+                if (res.Status == 429)
                 {
-                    json = await res.Content.ReadAsStringAsync();
-                    if (res.StatusCode == (HttpStatusCode)429)
-                    {
-                        throw new InvalidOperationException("AniList 要求稍後再試，請等一下再搜尋");
-                    }
-                    if (res.IsSuccessStatusCode == false)
-                    {
-                        throw new InvalidOperationException("AniList 回應錯誤（" + (int)res.StatusCode + "）");
-                    }
+                    throw new InvalidOperationException("AniList 要求稍後再試，請等一下再搜尋");
+                }
+                if (res.IsSuccess == false)
+                {
+                    throw new InvalidOperationException("AniList 回應錯誤（" + res.Status + "）");
                 }
             }
             catch (InvalidOperationException)
             {
                 throw;
             }
-            catch (Exception)
+            catch (Exception ex)
             {
-                throw new InvalidOperationException("連不上 AniList，請確認主機可以連到外網");
+                throw ConnectError("AniList", ex, "，請確認主機可以連到外網");
             }
 
             List<CoverCandidate> list = new List<CoverCandidate>();
@@ -579,19 +816,16 @@ namespace WhatSearch.Services
         {
             try
             {
-                using (HttpResponseMessage res = await http.GetAsync(url))
+                FetchResult res = await FetchAsync("GET", url);
+                if (res.Status == 429 || res.Status == (int)HttpStatusCode.Forbidden || res.Status == (int)HttpStatusCode.ServiceUnavailable)
                 {
-                    string json = await res.Content.ReadAsStringAsync();
-                    if (res.StatusCode == (HttpStatusCode)429 || res.StatusCode == HttpStatusCode.Forbidden || res.StatusCode == HttpStatusCode.ServiceUnavailable)
-                    {
-                        throw new InvalidOperationException(name + " 要求稍後再試，請等一下再搜尋");
-                    }
-                    if (res.IsSuccessStatusCode == false)
-                    {
-                        throw new InvalidOperationException(name + " 回應錯誤（" + (int)res.StatusCode + "）");
-                    }
-                    return json;
+                    throw new InvalidOperationException(name + " 要求稍後再試，請等一下再搜尋");
                 }
+                if (res.IsSuccess == false)
+                {
+                    throw new InvalidOperationException(name + " 回應錯誤（" + res.Status + "）");
+                }
+                return res.Text;
             }
             catch (InvalidOperationException)
             {
@@ -599,13 +833,7 @@ namespace WhatSearch.Services
             }
             catch (Exception ex)
             {
-                // 附上最內層的例外訊息，方便判斷是 TLS、DNS 還是逾時
-                Exception inner = ex;
-                while (inner.InnerException != null)
-                {
-                    inner = inner.InnerException;
-                }
-                throw new InvalidOperationException("連不上 " + name + "（" + inner.Message + "）");
+                throw ConnectError(name, ex);
             }
         }
 
@@ -718,12 +946,8 @@ namespace WhatSearch.Services
         {
             try
             {
-                using (HttpRequestMessage req = new HttpRequestMessage(HttpMethod.Head, url))
-                using (HttpResponseMessage res = await http.SendAsync(req))
-                {
-                    int code = (int)res.StatusCode;
-                    return code >= 300 && code < 400;
-                }
+                FetchResult res = await FetchAsync("HEAD", url);
+                return res.Status >= 300 && res.Status < 400;
             }
             catch (Exception)
             {
@@ -777,57 +1001,37 @@ namespace WhatSearch.Services
             {
                 // 自己跟著轉址（Cover Art Archive 會轉到 archive.org），每一跳都要通過白名單
                 string current = url;
-                HttpResponseMessage first = null;
+                FetchResult res;
                 for (int hop = 0; ; hop++)
                 {
-                    first = await http.GetAsync(current, HttpCompletionOption.ResponseHeadersRead);
-                    int code = (int)first.StatusCode;
-                    if (code < 300 || code >= 400)
+                    res = await FetchAsync("GET", current);
+                    if (res.Status < 300 || res.Status >= 400)
                     {
                         break;
                     }
-                    Uri next = first.Headers.Location == null ? null : new Uri(new Uri(current), first.Headers.Location);
-                    first.Dispose();
-                    if (hop >= 5 || next == null || IsAllowedImageUrl(next.AbsoluteUri) == false)
+                    if (hop >= 5 || res.Location == null || IsAllowedImageUrl(res.Location) == false)
                     {
                         throw new InvalidOperationException("不支援的圖片來源");
                     }
-                    current = next.AbsoluteUri;
+                    current = res.Location;
                 }
-                using (HttpResponseMessage res = first)
+                if (res.IsSuccess == false)
                 {
-                    if (res.IsSuccessStatusCode == false)
-                    {
-                        throw new InvalidOperationException("下載圖片失敗（" + (int)res.StatusCode + "）");
-                    }
-                    if (res.Content.Headers.ContentLength > MaxImageBytes)
-                    {
-                        throw new InvalidOperationException("圖片太大");
-                    }
-                    using (Stream s = await res.Content.ReadAsStreamAsync())
-                    using (MemoryStream ms = new MemoryStream())
-                    {
-                        byte[] buffer = new byte[81920];
-                        int n;
-                        while ((n = await s.ReadAsync(buffer, 0, buffer.Length)) > 0)
-                        {
-                            ms.Write(buffer, 0, n);
-                            if (ms.Length > MaxImageBytes)
-                            {
-                                throw new InvalidOperationException("圖片太大");
-                            }
-                        }
-                        data = ms.ToArray();
-                    }
+                    throw new InvalidOperationException("下載圖片失敗（" + res.Status + "）");
                 }
+                data = res.Body;
+            }
+            catch (InvalidOperationException ex) when (ex.Message == "回應太大")
+            {
+                throw new InvalidOperationException("圖片太大");
             }
             catch (InvalidOperationException)
             {
                 throw;
             }
-            catch (Exception)
+            catch (Exception ex)
             {
-                throw new InvalidOperationException("下載圖片失敗，請確認主機可以連到外網");
+                throw new InvalidOperationException("下載圖片失敗（" + InnerMessage(ex) + "），請確認主機可以連到外網");
             }
             if (data.Length < 3 || data[0] != 0xFF || data[1] != 0xD8 || data[2] != 0xFF)
             {
