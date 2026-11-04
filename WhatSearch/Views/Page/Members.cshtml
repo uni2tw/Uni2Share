@@ -314,7 +314,7 @@
             </table>
         </div>
 
-        <div v-if="adding" style="position:fixed; inset:0; background:rgba(0,0,0,0.45); z-index:2000; display:flex; align-items:center; justify-content:center; padding:16px;" v-on:click.self="vm_closeAdd()">
+        <div v-if="adding" style="position:fixed; inset:0; background:rgba(0,0,0,0.45); z-index:2000; display:flex; align-items:center; justify-content:center; padding:16px;">
             <div style="background:#fff; border-radius:12px; padding:20px; width:100%; max-width:420px;" v-on:keydown="vm_addKeydown">
                 <h2 class="h5" style="margin-bottom:12px;"><i class="fa fa-user-plus"></i> 新增會員</h2>
                 <div v-if="!adding.done">
