@@ -502,6 +502,7 @@
                     <a v-if="isAdmin" href="/admin"><i class="fa fa-user-shield"></i> 管理<span v-if="alertUnread > 0" class="news-count">{{ alertUnread > 99 ? '99+' : alertUnread }}</span></a>
                     <a v-if="isLoggedIn" :href="accountHref()"><i class="fa fa-user"></i> 我的帳號</a>
                     <a v-if="isLoggedIn" :href="logoutHref()"><i class="fa fa-sign-out-alt"></i> 登出</a>
+                    <a v-else :href="loginHref()"><i class="fa fa-sign-in-alt"></i> 登入</a>
                 </div>
             </div>
         </div>
@@ -3583,6 +3584,10 @@
                         target += (target.indexOf('?') === -1 ? '?' : '&') + 'playId=' + encodeURIComponent(itemId);
                     }
                     location.href = '/page/login?returnUrl=' + encodeURIComponent(target);
+                },
+                // 沒登入時選單的「登入」：登入後回到現在看的頁面
+                loginHref: function () {
+                    return '/page/login?returnUrl=' + encodeURIComponent(location.pathname + location.search);
                 },
                 logoutHref: function () {
                     return '/logout?returnUrl=' + encodeURIComponent(location.pathname + location.search);
