@@ -1,0 +1,151 @@
+﻿@{
+    this.Layout = "_Layout.cshtml";
+}
+
+    <script type="text/javascript">
+        document.addEventListener('DOMContentLoaded', function () {
+            const App = {
+                data() {
+                    return {
+                        loaded: false,
+                        failed: false,
+                        data: null,
+                        // 載入當下的「上次已讀時間」：比它新的事件這次畫面上標示「新」，載入後才把全部標成已讀
+                        seenBefore: 0
+                    }
+                },
+                computed: {
+                    events: function () {
+                        return this.data ? this.data.events : [];
+                    }
+                },
+                mounted: function () {
+                    this.vm_load();
+                },
+                methods: {
+                    vm_home: function () {
+                        location.href = '/page';
+                    },
+                    vm_showAlert: function (text) {
+                        var el = document.querySelector('.alert');
+                        el.textContent = text;
+                        el.style.display = 'block';
+                        el.style.opacity = '1';
+                        window.setTimeout(function () {
+                            el.style.transition = 'opacity 0.4s';
+                            el.style.opacity = '0';
+                            window.setTimeout(function () {
+                                el.style.display = 'none';
+                            }, 400);
+                        }, 3000);
+                    },
+                    vm_load: function () {
+                        var self = this;
+                        axios.get('/admin/security/data').then(function (res) {
+                            // 登入失效時伺服器會轉去登入頁，拿到的是 HTML 不是資料
+                            if (!res.data || !Array.isArray(res.data.events)) {
+                                self.failed = true;
+                                return;
+                            }
+                            self.data = res.data;
+                            self.seenBefore = res.data.lastRead;
+                            self.failed = false;
+                            self.loaded = true;
+                            if (res.data.unread > 0) {
+                                axios.post('/admin/security/read', {}).catch(function () { });
+                            }
+                        }).catch(function () {
+                            self.failed = true;
+                        });
+                    },
+                    vm_clear: function () {
+                        var self = this;
+                        if (!window.confirm('確定要清除所有異常請求記錄嗎？')) {
+                            return;
+                        }
+                        axios.post('/admin/security/clear', {}).then(function (res) {
+                            var d = res.data || {};
+                            if (d.success === 1) {
+                                self.data.events = [];
+                                self.data.unread = 0;
+                            }
+                            self.vm_showAlert(d.message || '清除失敗');
+                        }).catch(function () {
+                            self.vm_showAlert('清除失敗，請稍後再試');
+                        });
+                    },
+                    vm_isNew: function (ev) {
+                        return ev.time > this.seenBefore;
+                    },
+                    vm_time: function (ms) {
+                        return ms ? new Date(ms).toLocaleString() : '';
+                    }
+                }
+            };
+            window.app = Vue.createApp(App).mount('#main');
+        });
+    </script>
+
+<body>
+    <div id="main" class="container" style="max-width:1000px; padding-top:16px; padding-bottom:40px;" v-cloak>
+        <div class="alert alert-info" style="display:none; margin-bottom:10px"></div>
+        <h1 class="h3" style="display:flex; align-items:center; gap:10px;">
+            <button type="button" class="btn btn-sm btn-info" v-on:click="vm_home()" title="回首頁"><i class="fa fa-home"></i></button>
+            異常請求
+            <span style="margin-left:auto; display:flex; gap:6px;">
+                <a href="/admin" class="btn btn-sm btn-outline-secondary"><i class="fa fa-users"></i> 會員管理</a>
+                <a href="/admin/monitor" class="btn btn-sm btn-outline-secondary"><i class="fa fa-chart-line"></i> 播放監控</a>
+                <a href="/admin/convert" class="btn btn-sm btn-outline-secondary"><i class="fa fa-film"></i> MKV 轉檔</a>
+            </span>
+        </h1>
+        <div style="font-size:13px; color:#666; margin:0 0 12px 0; line-height:1.7;">
+            同一個 IP 在 <b>{{ data ? data.windowSeconds : 60 }}</b> 秒內有 <b>{{ data ? data.threshold : 3 }}</b> 次「這個網站根本沒有的網址」(404)，就記一筆（常是網路上的掃描器亂試 .php、.env 之類）。
+            記錄後 {{ data ? data.cooldownMinutes : 10 }} 分鐘內同一個 IP 只累加次數，不重複新增。這裡只偵測與記錄，不會封鎖。
+            <span v-if="data && !data.enabled" style="color:#b26a00;"><i class="fa fa-triangle-exclamation"></i> 偵測目前是關閉的（config 的 abnormal.enabled）</span>
+            <span v-if="failed" style="color:#dc3545;"><i class="fa fa-triangle-exclamation"></i> 載入失敗</span>
+        </div>
+
+        <div v-if="!loaded" style="color:#888; padding:20px 0;">載入中…</div>
+
+        <div v-else>
+            <div style="display:flex; align-items:center; margin-bottom:8px;">
+                <span style="font-size:13px; color:#666;">共 {{ events.length }} 筆（新到舊）</span>
+                <span style="margin-left:auto; display:flex; gap:6px;">
+                    <button type="button" class="btn btn-sm btn-outline-secondary" v-on:click="vm_load()"><i class="fa fa-rotate"></i> 重新整理</button>
+                    <button type="button" class="btn btn-sm btn-outline-danger" :disabled="events.length === 0" v-on:click="vm_clear()"><i class="fa fa-trash"></i> 清除記錄</button>
+                </span>
+            </div>
+            <div v-if="events.length === 0" style="color:#888; padding:20px 0;">目前沒有異常請求記錄。</div>
+            <div v-else class="table-responsive">
+                <table class="table table-sm align-top">
+                    <thead>
+                        <tr style="font-size:13px; color:#888;">
+                            <th style="white-space:nowrap;">時間</th>
+                            <th>來源 IP</th>
+                            <th style="white-space:nowrap;">次數</th>
+                            <th>請求的網址</th>
+                            <th>User-Agent</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr v-for="ev in events" :key="ev.time + ev.ip" :class="{'table-warning': vm_isNew(ev)}">
+                            <td style="font-size:13px; white-space:nowrap;">
+                                {{ vm_time(ev.time) }}
+                                <span v-if="vm_isNew(ev)" class="badge bg-danger" style="margin-left:4px;">新</span>
+                            </td>
+                            <td style="font-family:monospace; font-size:13px; white-space:nowrap;">
+                                {{ ev.ip }}
+                                <span v-if="ev.suspicious" class="badge bg-danger" title="路徑像是在探測（.php、.env、wp-admin…）" style="margin-left:4px;">可疑</span>
+                            </td>
+                            <td style="font-size:13px; white-space:nowrap;" :title="'最後一次 ' + vm_time(ev.last)">{{ ev.count }}</td>
+                            <td style="font-family:monospace; font-size:12px; word-break:break-all;">
+                                <div v-for="p in ev.paths" :key="p">{{ p }}</div>
+                            </td>
+                            <td style="font-size:12px; color:#666; word-break:break-all; max-width:260px;">{{ ev.ua }}</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</body>

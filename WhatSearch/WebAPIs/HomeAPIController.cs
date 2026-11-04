@@ -33,6 +33,7 @@ namespace WhatSearch.WebAPIs
         IRatingService ratingService = Ioc.Get<IRatingService>();
         IUnplayableService unplayableService = Ioc.Get<IUnplayableService>();
         INewsService newsService = Ioc.Get<INewsService>();
+        IAbnormalRequestService abnormalService = Ioc.Get<IAbnormalRequestService>();
         SystemConfig config = Ioc.GetConfig();
         static ILogger logger = LogManager.GetCurrentClassLogger();
 
@@ -735,6 +736,8 @@ namespace WhatSearch.WebAPIs
                 Transcode = transcodeService.Enabled,
                 // 是否為管理者（前端據此顯示「無法播放」註記按鈕）
                 Admin = User.Identity.IsAuthenticated && User.IsInRole("Admin"),
+                // 管理者還沒看的異常請求事件數（非管理者一律 0）
+                Alerts = (User.Identity.IsAuthenticated && User.IsInRole("Admin")) ? abnormalService.GetUnread() : 0,
                 // 新上架的未讀數；沒登入或沒有啟用新上架為 null（前端據此決定要不要顯示入口）
                 News = (newsService.Enabled && User.Identity.IsAuthenticated) ? (int?)newsService.GetUnread(User.Identity.Name) : null
             };

@@ -84,6 +84,9 @@ namespace WhatSearch
                 });
             }
 
+            // 放在最前面，才看得到靜態檔也找不到的請求
+            app.UseMiddleware<AbnormalRequestMiddleware>();
+
             app.UseStaticFiles(new StaticFileOptions
             {                 
                 RequestPath = new PathString("/assets"),

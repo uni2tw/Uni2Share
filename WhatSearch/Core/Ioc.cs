@@ -35,6 +35,7 @@ namespace WhatSearch.Core
             builder.RegisterType<CoverSearchService>().As<ICoverSearchService>().SingleInstance();
             builder.RegisterType<RatingService>().As<IRatingService>().SingleInstance();
             builder.RegisterType<UnplayableService>().As<IUnplayableService>().SingleInstance();
+            builder.RegisterType<AbnormalRequestService>().As<IAbnormalRequestService>().SingleInstance();
             builder.RegisterType<VideoConvertService>().As<IVideoConvertService>().SingleInstance();
             builder.RegisterType<NewsService>().As<INewsService>().SingleInstance();
             builder.RegisterType<ReseekFolderJob>().As<IReseekFolderJob>().SingleInstance();

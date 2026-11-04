@@ -15,6 +15,8 @@
                         reset: null,
                         // 新增會員對話框：done 表示已建立成功（這時還看得到密碼，方便複製）
                         adding: null,
+                        // 異常請求還沒看的事件數（載入後才知道）
+                        alertUnread: 0,
                         // role：下拉選單目前選的身分；savedRole：已儲存的身分（兩者不同就是「尚未儲存」）
                         // 載入時排序：待啟用的在最上面（管理者進這頁多半是為了批准新會員），其次管理者，最後一般會員；之後儲存不會重新排序
                         members: JSON.parse(@Html.SerializeJson((object)Model)).map(function (m, i) {
@@ -22,6 +24,12 @@
                             return Object.assign({}, m, { role: role, savedRole: role, saving: false, order: (role === 'pending' ? 0 : (role === 'admin' ? 1 : 2)) * 1000 + i });
                         }).sort(function (a, b) { return a.order - b.order; })
                     }
+                },
+                mounted: function () {
+                    var self = this;
+                    axios.get('/admin/security/data').then(function (res) {
+                        self.alertUnread = Number(res.data && res.data.unread) || 0;
+                    }).catch(function () { });
                 },
                 methods: {
                     vm_showAlert: function (text) {
@@ -265,6 +273,7 @@
             <span style="margin-left:auto; display:flex; gap:6px;">
                 <button type="button" class="btn btn-sm btn-primary" v-on:click="vm_openAdd()"><i class="fa fa-user-plus"></i> 新增會員</button>
                 <a href="/admin/monitor" class="btn btn-sm btn-outline-secondary"><i class="fa fa-chart-line"></i> 播放監控</a>
+                <a href="/admin/security" class="btn btn-sm btn-outline-secondary"><i class="fa fa-shield-halved"></i> 異常請求<span v-if="alertUnread > 0" class="badge bg-danger" style="margin-left:4px;">{{ alertUnread }}</span></a>
                 <a href="/admin/convert" class="btn btn-sm btn-outline-secondary"><i class="fa fa-film"></i> MKV 轉檔</a>
             </span>
         </h1>
