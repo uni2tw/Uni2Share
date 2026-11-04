@@ -92,6 +92,51 @@ namespace WhatSearch.Controllers
             return new { Success = 1, Message = string.Format("{0} 已設為{1}", mem.DisplayName, label), Role = model.role.ToLowerInvariant() };
         }
 
+        /// <summary>異常請求頁：同一個 IP 短時間內一直打到不存在的網址（常是網路上的掃描器亂試）會在這裡留下記錄</summary>
+        [Route("admin/security")]
+        [RoleAuthorize("Admin")]
+        public IActionResult SecurityPage()
+        {
+            return View("Security");
+        }
+
+        [HttpGet]
+        [Route("admin/security/data")]
+        [RoleAuthorize("Admin")]
+        public dynamic SecurityData()
+        {
+            AbnormalSnapshot snap = Ioc.Get<IAbnormalRequestService>().Get();
+            AbnormalRequestConfig cfg = Ioc.GetConfig().Abnormal;
+            return new
+            {
+                events = snap.Events,
+                unread = snap.Unread,
+                lastRead = snap.LastRead,
+                enabled = cfg.Enabled,
+                threshold = cfg.Threshold,
+                windowSeconds = cfg.WindowSeconds,
+                cooldownMinutes = cfg.CooldownMinutes
+            };
+        }
+
+        [HttpPost]
+        [Route("admin/security/read")]
+        [RoleAuthorize("Admin")]
+        public dynamic SecurityRead()
+        {
+            Ioc.Get<IAbnormalRequestService>().MarkAllRead();
+            return new { Success = 1 };
+        }
+
+        [HttpPost]
+        [Route("admin/security/clear")]
+        [RoleAuthorize("Admin")]
+        public dynamic SecurityClear()
+        {
+            Ioc.Get<IAbnormalRequestService>().Clear();
+            return new { Success = 1, Message = "已清除記錄" };
+        }
+
         /// <summary>管理者新增會員：身分預設會員（直接啟用）；密碼由管理者設定並自己轉交對方，不會寫進日誌</summary>
         [HttpPost]
         [Route("admin/addMember")]

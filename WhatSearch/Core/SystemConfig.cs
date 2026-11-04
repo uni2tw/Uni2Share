@@ -56,6 +56,10 @@ namespace WhatSearch.Core
         [JsonPropertyName("curlPath")]
         public string CurlPath { get; set; }
 
+        /// <summary>異常請求偵測（有人亂試網址）；全部都有預設值，不寫也會啟用</summary>
+        [JsonPropertyName("abnormal")]
+        public AbnormalRequestConfig Abnormal { get; set; } = new AbnormalRequestConfig();
+
         //public HashSet
 
         public static SystemConfig Reload()
@@ -104,6 +108,18 @@ namespace WhatSearch.Core
             if (result.Transcode == null)
             {
                 result.Transcode = new TranscodeConfig();
+            }
+            if (result.Abnormal == null)
+            {
+                result.Abnormal = new AbnormalRequestConfig();
+            }
+            if (result.Abnormal.IgnoreIps == null)
+            {
+                result.Abnormal.IgnoreIps = new List<string>();
+            }
+            if (result.Abnormal.TrustedProxies == null)
+            {
+                result.Abnormal.TrustedProxies = new List<string>();
             }
             if (result.Rating.Albums == null)
             {
@@ -248,6 +264,36 @@ namespace WhatSearch.Core
         /// <summary>MKV 轉檔時 x264 最多用幾個執行緒（ffmpeg 的 -threads）；0 = 不限制（ffmpeg 自己決定，通常用滿所有核心）。想保留 CPU 給其它程式就設小一點，轉檔時間會跟著變長</summary>
         [JsonPropertyName("videoThreads")]
         public int VideoThreads { get; set; } = 0;
+    }
+
+    /// <summary>
+    /// 異常請求偵測：同一個 IP 在 windowSeconds 秒內有 threshold 次「沒有對應路由的 404」（例如亂試 /wp-login.php）就記一筆事件、通知管理者
+    /// </summary>
+    public class AbnormalRequestConfig
+    {
+        [JsonPropertyName("enabled")]
+        public bool Enabled { get; set; } = true;
+        /// <summary>時間窗內累積幾次 404 就算異常</summary>
+        [JsonPropertyName("threshold")]
+        public int Threshold { get; set; } = 3;
+        /// <summary>時間窗（秒）</summary>
+        [JsonPropertyName("windowSeconds")]
+        public int WindowSeconds { get; set; } = 60;
+        /// <summary>同一個 IP 觸發後幾分鐘內不再新增事件（只累加次數），避免被掃描器刷滿</summary>
+        [JsonPropertyName("cooldownMinutes")]
+        public int CooldownMinutes { get; set; } = 10;
+        /// <summary>最多保留幾筆事件，超過就刪最舊的</summary>
+        [JsonPropertyName("maxEvents")]
+        public int MaxEvents { get; set; } = 500;
+        /// <summary>不監控的來源 IP（單一 IP 或 a.b.c.d/nn），例如自己的辦公室</summary>
+        [JsonPropertyName("ignoreIps")]
+        public List<string> IgnoreIps { get; set; } = new List<string>();
+        /// <summary>
+        /// 站台放在反向代理後面時，代理的 IP（單一 IP 或 a.b.c.d/nn）：只有從這些位址連進來的請求才採用 X-Forwarded-For 當來源 IP。
+        /// 沒設定時信任本機與內網位址（10.x、172.16～31.x、192.168.x）
+        /// </summary>
+        [JsonPropertyName("trustedProxies")]
+        public List<string> TrustedProxies { get; set; } = new List<string>();
     }
 
     public class LoudnessConfig

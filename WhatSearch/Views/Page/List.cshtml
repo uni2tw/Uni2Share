@@ -485,7 +485,7 @@
             <button v-if="breadcrumbIsVisible" type="button" class="btn btn-outline-light nav-icon-btn" title="搜尋"
                 v-on:click.stop="toggleBarMode()"><i class="fa fa-search"></i></button>
             <div class="nav-menu">
-                <button v-on:click.stop="toggleMenu()" class="btn btn-success nav-icon-btn"><i class="fa fa-bars"></i><span v-if="newsUnread > 0" class="news-badge">{{ newsUnread > 99 ? '99+' : newsUnread }}</span></button>
+                <button v-on:click.stop="toggleMenu()" class="btn btn-success nav-icon-btn"><i class="fa fa-bars"></i><span v-if="newsUnread + alertUnread > 0" class="news-badge">{{ newsUnread + alertUnread > 99 ? '99+' : newsUnread + alertUnread }}</span></button>
                 <div class="nav-menu-dropdown" v-if="menuOpen">
                     <button type="button" v-on:click.stop="vm_menuAction(toggleBarMode)">
                         <i class="fa fa-search"></i> 切換搜尋
@@ -499,6 +499,7 @@
                     <button v-if="isLoggedIn" type="button" v-on:click.stop="vm_menuAction(vm_showFavorites)">
                         <i class="fa-solid fa-heart"></i> 我的最愛
                     </button>
+                    <a v-if="isAdmin" href="/admin"><i class="fa fa-user-shield"></i> 管理<span v-if="alertUnread > 0" class="news-count">{{ alertUnread > 99 ? '99+' : alertUnread }}</span></a>
                     <a v-if="isLoggedIn" :href="accountHref()"><i class="fa fa-user"></i> 我的帳號</a>
                     <a v-if="isLoggedIn" :href="logoutHref()"><i class="fa fa-sign-out-alt"></i> 登出</a>
                 </div>
@@ -1156,6 +1157,8 @@
                     showListView: false,
                     newsEnabled: false,
                     newsUnread: 0,
+                    // 管理者還沒看的異常請求事件數
+                    alertUnread: 0,
                     newsView: false,
                     newsEntries: [],
                     newsRange: 1,
@@ -1710,6 +1713,7 @@
                     this.transcodeEnabled = !!res.data.transcode;
                     this.isAdmin = !!res.data.admin;
                     this.newsUnread = res.data.news || 0;
+                    this.alertUnread = this.isAdmin ? (res.data.alerts || 0) : 0;
                     if (this.isLoggedIn) {
                         this.vm_loadFavorites();
                     }
