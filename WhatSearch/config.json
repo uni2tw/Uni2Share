@@ -10,8 +10,7 @@
 	"folders": [
 		{
 			"title": "Temp",
-			"path": "C:\\Share",
-			"private":  false
+			"path": "C:\\Share"
 		}
 		//,{
 		//  "title": "Mp3",

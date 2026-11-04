@@ -2,9 +2,6 @@
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Filters;
 using System;
-using System.IO;
-using WhatSearch.Services;
-using WhatSearch.Utility;
 
 namespace WhatSearch.WebAPIs.Filters
 {
@@ -15,7 +12,8 @@ namespace WhatSearch.WebAPIs.Filters
             if (context.HttpContext.User.Identity.IsAuthenticated == false)
             {
                 var returnUrl = context.HttpContext.Request.Path.ToString();
-                if (IsUnderProtected(returnUrl))
+                // 瀏覽與搜尋公開；打開任何檔案（影音、圖片、文字、字幕）都要登入，不再由分享資料夾各自決定
+                if (returnUrl.StartsWith("/get/", StringComparison.OrdinalIgnoreCase))
                 {
                     context.Result = new RedirectResult(
                         "/page/login?returnUrl=" + Uri.EscapeDataString(returnUrl));
@@ -23,33 +21,6 @@ namespace WhatSearch.WebAPIs.Filters
                 return;
             }
             base.OnActionExecuting(context);
-        }
-
-        private bool IsUnderProtected(string url)
-        {
-            url = System.Web.HttpUtility.UrlDecode(url);
-            string prefix = "/get/";
-            string pathinfo;
-            if (url.StartsWith(prefix))
-            {
-                pathinfo = url.Substring(prefix.Length);
-            } 
-            else
-            {
-                pathinfo = url;
-            }
-            string fileType = Helper.GetFileDocType(Path.GetExtension(pathinfo));
-            if (fileType == Helper.ConstStrings.Music || fileType == Helper.ConstStrings.Video)
-            {
-                return true;
-            }
-
-            if (PathUtility.IsProtetedUrl("/" + pathinfo) == false)
-            {
-                return false;
-            }
-
-            return true;
         }
     }
 }

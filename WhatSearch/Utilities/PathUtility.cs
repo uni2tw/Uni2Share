@@ -131,40 +131,5 @@ namespace WhatSearch.Services
                 string.Join(Path.DirectorySeparatorChar, bottomRelPaths));
             return true;
         }
-
-        /// <summary>
-        /// 
-        /// </summary>
-        /// <param name="relPath"></param>
-        /// <param name="topFolder"></param>
-        /// <returns></returns>
-        public static bool IsProtetedUrl(string relPath)
-        {
-            if (string.IsNullOrEmpty(relPath))
-            {
-                return false;
-            }
-            FolderConfig targetFolder = null;
-            string[] relPathParts = relPath.Split(new char[] { '/' }, StringSplitOptions.RemoveEmptyEntries).ToArray();
-            if (relPathParts.Length == 0)
-            {
-                return false;
-            }
-            string topRelPath = relPathParts[0];
-            foreach (var sf in config.Folders)
-            {
-                string shareRelPath = sf.Title;
-                if (topRelPath.Equals(shareRelPath, StringComparison.OrdinalIgnoreCase))
-                {
-                    targetFolder = sf;
-                    break;
-                }
-            }
-            if (targetFolder != null && targetFolder.isProtected)
-            {
-                return true;
-            }
-            return false;
-        }
     }
 }
