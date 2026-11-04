@@ -92,6 +92,44 @@ namespace WhatSearch.Controllers
             return new { Success = 1, Message = string.Format("{0} 已設為{1}", mem.DisplayName, label), Role = model.role.ToLowerInvariant() };
         }
 
+        /// <summary>管理者新增會員：身分預設會員（直接啟用）；密碼由管理者設定並自己轉交對方，不會寫進日誌</summary>
+        [HttpPost]
+        [Route("admin/addMember")]
+        [RoleAuthorize("Admin")]
+        public dynamic AddMember([FromBody] AddMemberModel model)
+        {
+            MemberRole role;
+            switch ((model?.role ?? "member").ToLowerInvariant())
+            {
+                case "admin": role = MemberRole.Admin; break;
+                case "member": role = MemberRole.Member; break;
+                case "pending": role = MemberRole.Pending; break;
+                default: return new { Success = 0, Message = "不支援的身分" };
+            }
+            IUserService srv = Ioc.Get<IUserService>();
+            string message;
+            if (srv.AddMember(model?.name, model?.displayName, model?.password, role, out message) == false)
+            {
+                return new { Success = 0, Message = message };
+            }
+            Member mem = srv.GetMember(model.name);
+            return new
+            {
+                Success = 1,
+                Message = string.Format("已新增 {0}", mem.DisplayName),
+                Member = new MemberView
+                {
+                    name = mem.Name,
+                    display = mem.DisplayName,
+                    status = (int)mem.Status,
+                    admin = mem.IsAdmin,
+                    create = mem.CreateTime,
+                    access = mem.LastAccessTime,
+                    self = false
+                }
+            };
+        }
+
         /// <summary>管理者重設會員密碼（也可以重設自己的）；密碼不會寫進日誌</summary>
         [HttpPost]
         [Route("admin/resetPassword")]
@@ -333,6 +371,15 @@ namespace WhatSearch.Controllers
         {
             public string name { get; set; }
             public string password { get; set; }
+        }
+
+        public class AddMemberModel
+        {
+            public string name { get; set; }
+            public string displayName { get; set; }
+            public string password { get; set; }
+            /// <summary>admin／member／pending；沒給就是 member</summary>
+            public string role { get; set; }
         }
 
         public class UpdateMemberModel

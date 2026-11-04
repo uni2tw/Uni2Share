@@ -223,6 +223,30 @@ namespace WhatSearch.Services
 
         public bool Register(string name, string displayName, string password, out string message)
         {
+            bool isFirstMember = mp.GetMembers().Count == 0;
+            if (TryCreateMember(name, displayName, password, isFirstMember, isFirstMember ? MemberStatus.Active : MemberStatus.Invalice, out message) == false)
+            {
+                return false;
+            }
+            message = isFirstMember ? "註冊成功，已自動設為管理者" : "註冊成功，請等待管理者啟用帳號";
+            return true;
+        }
+
+        /// <summary>管理者新增會員：身分由管理者指定（管理者、會員直接啟用；待啟用不能登入）</summary>
+        public bool AddMember(string name, string displayName, string password, MemberRole role, out string message)
+        {
+            if (string.IsNullOrWhiteSpace(password) == false && password.Length > 128)
+            {
+                message = "密碼太長（最多 128 個字元）";
+                return false;
+            }
+            return TryCreateMember(name, displayName, password, role == MemberRole.Admin,
+                role == MemberRole.Pending ? MemberStatus.Invalice : MemberStatus.Active, out message);
+        }
+
+        // 註冊與管理者新增共用：檢查帳號、密碼、顯示名稱後建立會員（密碼存成雜湊）
+        bool TryCreateMember(string name, string displayName, string password, bool isAdmin, MemberStatus status, out string message)
+        {
             message = string.Empty;
             if (string.IsNullOrWhiteSpace(name) || string.IsNullOrWhiteSpace(password))
             {
@@ -240,21 +264,21 @@ namespace WhatSearch.Services
             {
                 return false;
             }
-            bool isFirstMember = mp.GetMembers().Count == 0;
+            // 建立時間與上次登入時間用同一個時間點，管理頁才能判斷「從未登入」
+            DateTime now = DateTime.Now;
             Member mem = new Member
             {
                 Name = name,
                 DisplayName = normalizedDisplayName,
                 PasswordHash = PasswordHasher.Hash(password),
                 PasswordFormat = PasswordFormat.Hashed,
-                Status = isFirstMember ? MemberStatus.Active : MemberStatus.Invalice,
-                IsAdmin = isFirstMember,
-                CreateTime = DateTime.Now,
-                LastAccessTime = DateTime.Now,
+                Status = status,
+                IsAdmin = isAdmin,
+                CreateTime = now,
+                LastAccessTime = now,
                 AccessToken = Guid.NewGuid().ToString("N")
             };
             mp.SaveMember(mem);
-            message = isFirstMember ? "註冊成功，已自動設為管理者" : "註冊成功，請等待管理者啟用帳號";
             return true;
         }
 
