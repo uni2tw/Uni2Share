@@ -49,6 +49,13 @@ namespace WhatSearch.Core
         [JsonPropertyName("transcode")]
         public TranscodeConfig Transcode { get; set; } = new TranscodeConfig();
 
+        /// <summary>
+        /// curl 執行檔的完整路徑（要是自帶 OpenSSL 的版本，例如 C:\tools\curl\curl.exe）。
+        /// 舊版 Windows（如 Windows 7）的系統 TLS 跟不上現在的網站，連封面來源會握手失敗；設定後遇到這種失敗就改叫 curl 連。沒設定或檔案不存在就不使用
+        /// </summary>
+        [JsonPropertyName("curlPath")]
+        public string CurlPath { get; set; }
+
         //public HashSet
 
         public static SystemConfig Reload()
