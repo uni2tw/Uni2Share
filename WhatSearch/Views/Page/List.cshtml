@@ -859,6 +859,10 @@
                         <option :value="1.5">1.5x</option>
                         <option :value="2">2x</option>
                     </select>
+                    <button type="button" class="btn btn-sm btn-outline-light" style="margin-right:8px;" title="截取目前畫面（PNG，不含字幕）"
+                        :disabled="!!nowPlayingVideo.error" v-on:click="vm_captureFrame()">
+                        <i class="fa fa-camera"></i>
+                    </button>
                     <button type="button" class="btn btn-sm btn-outline-light" v-on:click="vm_closeVideo()">
                         <i class="fa fa-times"></i>
                     </button>
@@ -2995,6 +2999,58 @@
                         return { label: '日本語', srclang: 'ja', order: 4 };
                     }
                     return { label: t.name || t.language || '字幕', srclang: 'und', order: 6 };
+                },
+                // 截取影片目前的畫面存成 PNG（原始解析度，瀏覽器原生字幕不會在畫面像素裡，所以不含字幕）。
+                // 手機（iOS）沒有「直接下載到相簿」，優先用系統分享面板（可選「儲存影像」）；不行就退回一般下載
+                vm_captureFrame: function () {
+                    let v = this.$refs.videoEl;
+                    if (!v || !v.videoWidth || !v.videoHeight) {
+                        this.noticeDialog = { title: '無法截圖', name: '', text: '影片還沒載入完成，稍後再試。' };
+                        return;
+                    }
+                    let seconds = Math.floor(v.currentTime || 0);
+                    let pad = n => (n < 10 ? '0' : '') + n;
+                    let stamp = pad(Math.floor(seconds / 3600)) + '-' + pad(Math.floor(seconds % 3600 / 60)) + '-' + pad(seconds % 60);
+                    let base = (this.nowPlayingVideo.title || 'video').replace(/\.[^.]+$/, '').replace(/[\\/:*?"<>|]/g, '_').trim() || 'video';
+                    let fileName = base + ' [' + stamp + '].png';
+                    let canvas = document.createElement('canvas');
+                    canvas.width = v.videoWidth;
+                    canvas.height = v.videoHeight;
+                    try {
+                        canvas.getContext('2d').drawImage(v, 0, 0, canvas.width, canvas.height);
+                    } catch (e) {
+                        this.noticeDialog = { title: '無法截圖', name: fileName, text: '瀏覽器不允許讀取這個影片的畫面。' };
+                        return;
+                    }
+                    canvas.toBlob(blob => {
+                        if (!blob) {
+                            this.noticeDialog = { title: '無法截圖', name: fileName, text: '產生圖片失敗，可能是畫面太大。' };
+                            return;
+                        }
+                        let download = () => {
+                            let url = URL.createObjectURL(blob);
+                            let a = document.createElement('a');
+                            a.href = url;
+                            a.download = fileName;
+                            document.body.appendChild(a);
+                            a.click();
+                            document.body.removeChild(a);
+                            window.setTimeout(() => URL.revokeObjectURL(url), 10000);
+                        };
+                        let isIos = /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+                        let file = null;
+                        try { file = new File([blob], fileName, { type: 'image/png' }); } catch (e) { file = null; }
+                        if (isIos && file && navigator.canShare && navigator.canShare({ files: [file] })) {
+                            navigator.share({ files: [file] }).catch(err => {
+                                // 使用者自己關掉分享面板不算失敗；其他原因（例如失去使用者操作的授權）退回一般下載
+                                if (!err || err.name !== 'AbortError') {
+                                    download();
+                                }
+                            });
+                        } else {
+                            download();
+                        }
+                    }, 'image/png');
                 },
                 vm_closeVideo: function () {
                     this.vm_saveCurrentVideoProgress();
