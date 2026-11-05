@@ -27,6 +27,12 @@ namespace WhatSearch.Services.Interfaces
         bool Register(string name, string displayName, string password, out string message);
         /// <summary>管理者新增會員：身分由管理者指定，密碼存成雜湊；帳號重複、密碼空白或太長、顯示名稱不合規定時回傳 false，message 是原因</summary>
         bool AddMember(string name, string displayName, string password, MemberRole role, out string message);
-        bool Login(HttpResponse response, string name, string password, int cookieDays, out string message);
+        /// <summary>
+        /// 登入。密碼連續錯誤 MaxLoginFailures 次就鎖住帳號（要管理者解除），失敗時 message 會說明已錯幾次、還剩幾次機會；
+        /// 不存在的帳號也用同樣的訊息與次數（記在記憶體裡），不讓人從訊息分辨帳號存不存在。clientIp 只用來寫日誌。
+        /// </summary>
+        bool Login(HttpResponse response, string name, string password, int cookieDays, string clientIp, out string message);
+        /// <summary>管理者解除鎖定並把失敗次數歸零；找不到會員回傳 false</summary>
+        bool UnlockMember(string name);
     }
 }

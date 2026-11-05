@@ -54,6 +54,12 @@ namespace WhatSearch.Models
         public DateTime CreateTime { get; set; }
         [JsonPropertyName("access")]
         public DateTime LastAccessTime { get; set; }
+        /// <summary>連續輸入錯誤密碼的次數；密碼正確、管理者解除鎖定或重設密碼後歸零</summary>
+        [JsonPropertyName("fails")]
+        public int FailedLoginCount { get; set; }
+        /// <summary>密碼連續錯誤太多次而被鎖住：鎖住期間連正確的密碼都不能登入，要由管理者解除（已經登入的裝置不受影響）</summary>
+        [JsonPropertyName("locked")]
+        public bool Locked { get; set; }
     }
 
     /// <summary>管理頁可以設定的身分：管理者（已啟用）、會員（已啟用）、待啟用（不能登入）</summary>

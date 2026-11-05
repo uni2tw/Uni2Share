@@ -17,6 +17,19 @@ namespace WhatSearch.Services
     {
         static ILogger logger = LogManager.GetCurrentClassLogger();
         IMemberProvider mp = Ioc.Get<IMemberProvider>();
+
+        /// <summary>密碼連續錯誤幾次就鎖住帳號</summary>
+        public const int MaxLoginFailures = 5;
+        // 不存在的帳號也要有同樣的「錯幾次、鎖住」反應，否則看訊息就知道帳號存不存在；這份記錄只放記憶體，過一段時間沒再試就忘掉
+        const int UnknownNameMinutes = 30;
+        const int UnknownNameMax = 1000;
+        class UnknownTry
+        {
+            public int Count;
+            public DateTime Last;
+            public bool Locked;
+        }
+        static readonly Dictionary<string, UnknownTry> unknownTries = new Dictionary<string, UnknownTry>(StringComparer.Ordinal);
         public void SetIdentityByToken(HttpContext context, string accessToken)
         {
             Member mem = mp.GetMemberByToken(accessToken);
@@ -84,6 +97,18 @@ namespace WhatSearch.Services
             {
                 m.PasswordHash = hashed;
                 m.PasswordFormat = PasswordFormat.Hashed;
+                // 管理者給了新密碼，鎖住的帳號也一併解除
+                m.Locked = false;
+                m.FailedLoginCount = 0;
+            });
+        }
+
+        public bool UnlockMember(string name)
+        {
+            return mp.Update(name, m =>
+            {
+                m.Locked = false;
+                m.FailedLoginCount = 0;
             });
         }
 
@@ -282,13 +307,105 @@ namespace WhatSearch.Services
             return true;
         }
 
-        public bool Login(HttpResponse response, string name, string password, int cookieDays, out string message)
+        static string FailMessage(int count)
+        {
+            return string.Format("帳號或密碼錯誤（已失敗 {0}/{1} 次，再錯 {2} 次帳號會被鎖住）", count, MaxLoginFailures, MaxLoginFailures - count);
+        }
+
+        static string LockedNowMessage()
+        {
+            return string.Format("密碼連續錯誤 {0} 次，帳號已鎖住，請聯絡管理者解除鎖定", MaxLoginFailures);
+        }
+
+        static string LockedMessage()
+        {
+            return string.Format("帳號已被鎖住（密碼曾連續錯誤 {0} 次），請聯絡管理者解除鎖定", MaxLoginFailures);
+        }
+
+        // 寫進日誌的文字：去掉控制字元（避免偽造日誌換行）並限制長度
+        static string LogText(string text)
+        {
+            if (string.IsNullOrEmpty(text))
+            {
+                return string.Empty;
+            }
+            System.Text.StringBuilder sb = new System.Text.StringBuilder();
+            foreach (char c in text)
+            {
+                if (sb.Length >= 50)
+                {
+                    break;
+                }
+                if (c >= 0x20 && c != 0x7f)
+                {
+                    sb.Append(c);
+                }
+            }
+            return sb.ToString();
+        }
+
+        // 不存在的帳號：和真的帳號一樣計次、一樣會「鎖住」，只是記在記憶體
+        static string UnknownNameMessage(string name)
+        {
+            if (string.IsNullOrEmpty(name))
+            {
+                return "帳號或密碼錯誤";
+            }
+            DateTime now = DateTime.Now;
+            lock (unknownTries)
+            {
+                UnknownTry t;
+                if (unknownTries.TryGetValue(name, out t) == false || now - t.Last > TimeSpan.FromMinutes(UnknownNameMinutes))
+                {
+                    if (unknownTries.Count >= UnknownNameMax)
+                    {
+                        foreach (string key in new List<string>(unknownTries.Keys))
+                        {
+                            if (now - unknownTries[key].Last > TimeSpan.FromMinutes(UnknownNameMinutes))
+                            {
+                                unknownTries.Remove(key);
+                            }
+                        }
+                        if (unknownTries.Count >= UnknownNameMax)
+                        {
+                            // 被大量亂猜的帳號塞滿了：不再追蹤新的，只回一般訊息，避免吃光記憶體
+                            return "帳號或密碼錯誤";
+                        }
+                    }
+                    t = new UnknownTry { Last = now };
+                    unknownTries[name] = t;
+                }
+                if (t.Locked)
+                {
+                    return LockedMessage();
+                }
+                t.Count++;
+                t.Last = now;
+                if (t.Count >= MaxLoginFailures)
+                {
+                    t.Locked = true;
+                    return LockedNowMessage();
+                }
+                return FailMessage(t.Count);
+            }
+        }
+
+        public bool Login(HttpResponse response, string name, string password, int cookieDays, string clientIp, out string message)
         {
             message = string.Empty;
+            password = password ?? string.Empty;
             Member mem = mp.GetMember(name);
             if (mem == null || string.IsNullOrEmpty(mem.PasswordHash))
             {
-                message = "帳號或密碼錯誤";
+                message = UnknownNameMessage(name);
+                logger.Info("登入失敗：找不到帳號 {0}（來源 {1}）", LogText(name), LogText(clientIp));
+                return false;
+            }
+            if (mem.Locked)
+            {
+                // 鎖住期間連正確的密碼都不收，否則鎖住就擋不了猜密碼
+                message = LockedMessage();
+                logger.Info("登入被拒：帳號 {0} 已鎖住（來源 {1}）", LogText(name), LogText(clientIp));
                 return false;
             }
 
@@ -315,15 +432,48 @@ namespace WhatSearch.Services
             }
             if (passwordOk == false)
             {
-                message = "帳號或密碼錯誤";
+                // 在 Update 裡累加（會鎖住整份資料），同時有多個請求猜密碼時次數才不會算少
+                int count = 0;
+                bool locked = false;
+                mp.Update(name, m =>
+                {
+                    if (m.Locked == false)
+                    {
+                        m.FailedLoginCount++;
+                        if (m.FailedLoginCount >= MaxLoginFailures)
+                        {
+                            m.Locked = true;
+                        }
+                    }
+                    count = m.FailedLoginCount;
+                    locked = m.Locked;
+                });
+                if (locked)
+                {
+                    message = LockedNowMessage();
+                    logger.Warn("帳號 {0} 密碼連續錯誤 {1} 次，已鎖住（來源 {2}）", LogText(name), count, LogText(clientIp));
+                }
+                else
+                {
+                    message = FailMessage(count);
+                    logger.Info("登入失敗：帳號 {0} 密碼錯誤，第 {1} 次（來源 {2}）", LogText(name), count, LogText(clientIp));
+                }
                 return false;
             }
             if (mem.Status != MemberStatus.Active)
             {
+                if (mem.FailedLoginCount > 0)
+                {
+                    mp.Update(name, m => m.FailedLoginCount = 0);
+                }
                 message = "帳號尚未啟用，請等待管理者啟用";
                 return false;
             }
-            mp.Update(name, m => m.LastAccessTime = DateTime.Now);
+            mp.Update(name, m =>
+            {
+                m.LastAccessTime = DateTime.Now;
+                m.FailedLoginCount = 0;
+            });
             ForceLogin(response, mem.AccessToken, cookieDays);
             return true;
         }
