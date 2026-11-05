@@ -641,8 +641,8 @@
                 <option value="name">名稱 A→Z</option>
                 <option value="time_desc">時間 新→舊</option>
                 <option value="time_asc">時間 舊→新</option>
-                <option v-if="ratingList" value="rating_desc">評分 高→低</option>
-                <option v-if="ratingList" value="rating_asc">評分 低→高</option>
+                <option v-if="ratingSortable" value="rating_desc">評分 高→低</option>
+                <option v-if="ratingSortable" value="rating_asc">評分 低→高</option>
             </select>
             <template v-if="ratingList">
                 <i class="fa fa-filter" style="color:#888; margin-left:2px;" title="篩選"></i>
@@ -1347,6 +1347,10 @@
                 // 目前列表裡有可評分的動畫資料夾（跨資料夾的搜尋不算）
                 ratingList: function() {
                     return !this.favView && this.allItems.some(t => t.rateable);
+                },
+                // 評分排序要不要出現：動畫季資料夾，或音樂的歌手資料夾（裡面有已評分的專輯，專輯評分在 album_rating）
+                ratingSortable: function() {
+                    return this.ratingList || (!this.favView && this.allItems.some(t => t.album_rating > 0));
                 },
                 // 目前清單裡有 FLAC 轉檔狀態的歌曲（有的話才顯示「FLAC 播原檔」）
                 // 目前畫面上所有可能有轉檔狀態的歌曲：一般清單，加上多片裝（Disc 1／Disc 2…）各光碟裡的歌（它們不在 allItems 裡）
@@ -2128,7 +2132,7 @@
                         dir = mode === 'time_desc' ? -1 : 1;
                         tie = byName;
                     } else if (mode === 'rating_desc' || mode === 'rating_asc') {
-                        key = t => (t.rating > 0 ? t.rating : null);
+                        key = t => (t.rating > 0 ? t.rating : (t.album_rating > 0 ? t.album_rating : null));
                         dir = mode === 'rating_desc' ? -1 : 1;
                     } else {
                         return list;
@@ -3658,7 +3662,7 @@
                     this.vm_markPlaying(res.items, res.discs);
                     // 排序記憶的 key：同一個資料夾從網址進入與從上層點進去的 id 不同（有無開頭的 /），所以用伺服器回傳的標準路徑；根目錄不記
                     this.sortFolderId = res.id ? (res.url || res.id) : '';
-                    this.sortMode = this.vm_loadSortPref(this.sortFolderId, items.some(t => t.rateable));
+                    this.sortMode = this.vm_loadSortPref(this.sortFolderId, items.some(t => t.rateable || t.album_rating > 0));
                     this.allItems = items;
                     this.notFound = null;
                     this.loadError = '';
