@@ -52,6 +52,8 @@ namespace WhatSearch.Controllers
                 admin = m.IsAdmin,
                 create = m.CreateTime,
                 access = m.LastAccessTime,
+                locked = m.Locked,
+                fails = m.FailedLoginCount,
                 self = string.Equals(m.Name, me, StringComparison.Ordinal)
             }).ToList();
             return View(model);
@@ -170,6 +172,8 @@ namespace WhatSearch.Controllers
                     admin = mem.IsAdmin,
                     create = mem.CreateTime,
                     access = mem.LastAccessTime,
+                    locked = mem.Locked,
+                    fails = mem.FailedLoginCount,
                     self = false
                 }
             };
@@ -196,7 +200,23 @@ namespace WhatSearch.Controllers
                 return new { Success = 0, Message = "密碼太長（最多 128 個字元）" };
             }
             srv.ResetPassword(mem.Name, model.password);
-            return new { Success = 1, Message = string.Format("已重設 {0} 的密碼", mem.DisplayName) };
+            return new { Success = 1, Message = string.Format("已重設 {0} 的密碼", mem.DisplayName) + (mem.Locked ? "，並解除鎖定" : string.Empty) };
+        }
+
+        /// <summary>管理者解除會員的鎖定（密碼連續錯誤太多次被鎖住），失敗次數一併歸零</summary>
+        [HttpPost]
+        [Route("admin/unlockMember")]
+        [RoleAuthorize("Admin")]
+        public dynamic UnlockMember([FromBody] UnlockMemberModel model)
+        {
+            IUserService srv = Ioc.Get<IUserService>();
+            Member mem = model == null || string.IsNullOrEmpty(model.name) ? null : srv.GetMember(model.name);
+            if (mem == null)
+            {
+                return new { Success = 0, Message = "找不到這個會員" };
+            }
+            srv.UnlockMember(mem.Name);
+            return new { Success = 1, Message = string.Format("已解除 {0} 的鎖定", mem.DisplayName) };
         }
 
         /// <summary>MKV 轉檔管理頁：被標註「無法播放」的動畫，把影片轉成 H.264 8-bit（原檔改名 .bak 保留）</summary>
@@ -412,6 +432,11 @@ namespace WhatSearch.Controllers
             public string id { get; set; }
         }
 
+        public class UnlockMemberModel
+        {
+            public string name { get; set; }
+        }
+
         public class ResetPasswordModel
         {
             public string name { get; set; }
@@ -443,6 +468,8 @@ namespace WhatSearch.Controllers
             public bool admin { get; set; }
             public DateTime create { get; set; }
             public DateTime access { get; set; }
+            public bool locked { get; set; }
+            public int fails { get; set; }
             public bool self { get; set; }
         }
     }

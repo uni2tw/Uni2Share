@@ -21,7 +21,7 @@
                         // 載入時排序：待啟用的在最上面（管理者進這頁多半是為了批准新會員），其次管理者，最後一般會員；之後儲存不會重新排序
                         members: JSON.parse(@Html.SerializeJson((object)Model)).map(function (m, i) {
                             var role = Number(m.status) !== 1 ? 'pending' : (m.admin ? 'admin' : 'member');
-                            return Object.assign({}, m, { role: role, savedRole: role, saving: false, order: (role === 'pending' ? 0 : (role === 'admin' ? 1 : 2)) * 1000 + i });
+                            return Object.assign({}, m, { role: role, savedRole: role, saving: false, order: (role === 'pending' || m.locked ? 0 : (role === 'admin' ? 1 : 2)) * 1000 + i });
                         }).sort(function (a, b) { return a.order - b.order; })
                     }
                 },
@@ -201,6 +201,25 @@
                             }
                         }
                     },
+                    vm_unlock: function (member) {
+                        var self = this;
+                        if (member.unlocking) {
+                            return;
+                        }
+                        member.unlocking = true;
+                        axios.post('/admin/unlockMember', { 'name': member.name }).then(function (res) {
+                            var data = res.data || {};
+                            if (data.success === 1) {
+                                member.locked = false;
+                                member.fails = 0;
+                            }
+                            self.vm_showAlert(data.message || '解除失敗');
+                        }).catch(function () {
+                            self.vm_showAlert('解除失敗，請稍後再試');
+                        }).finally(function () {
+                            member.unlocking = false;
+                        });
+                    },
                     vm_submitReset: function () {
                         var self = this;
                         var r = self.reset;
@@ -217,6 +236,8 @@
                             var data = res.data || {};
                             if (data.success === 1) {
                                 r.done = true;
+                                r.member.locked = false;
+                                r.member.fails = 0;
                                 self.vm_showAlert(data.message || '已重設密碼');
                             } else {
                                 r.error = data.message || '重設失敗';
@@ -280,7 +301,8 @@
         <div style="font-size:13px; color:#666; margin:0 0 12px 0; line-height:2;">
             <span class="badge bg-warning text-dark"><i class="fa-solid fa-crown"></i> 管理者</span> 可進這個管理頁、標註動畫無法播放；
             <span class="badge bg-success">會員</span> 可登入、播放；
-            <span class="badge bg-secondary">待啟用</span> 已註冊，改成「會員」或「管理者」並儲存後才能登入
+            <span class="badge bg-secondary">待啟用</span> 已註冊，改成「會員」或「管理者」並儲存後才能登入；
+            <span class="badge bg-danger"><i class="fa fa-lock"></i> 已鎖定</span> 密碼連續錯誤 5 次，要按「解除鎖定」（或重設密碼）才能再登入
         </div>
         <div class="table-responsive">
             <table class="table table-sm align-middle">
@@ -304,6 +326,8 @@
                             <span v-if="member.savedRole === 'admin'" class="badge bg-warning text-dark"><i class="fa-solid fa-crown"></i> 管理者</span>
                             <span v-else-if="member.savedRole === 'member'" class="badge bg-success">會員</span>
                             <span v-else class="badge bg-secondary">待啟用</span>
+                            <span v-if="member.locked" class="badge bg-danger" style="margin-left:4px;" title="密碼連續錯誤太多次，不能登入"><i class="fa fa-lock"></i> 已鎖定</span>
+                            <span v-else-if="member.fails > 0" style="font-size:12px; color:#b26a00; margin-left:4px;" title="連續輸入錯誤密碼的次數，輸入正確的密碼後歸零">密碼錯 {{ member.fails }} 次</span>
                             <select class="form-select form-select-sm" style="display:inline-block; width:auto; margin-left:6px;"
                                 v-model="member.role" :disabled="member.self || member.saving" :title="member.self ? '不能修改自己的身分' : '變更身分'">
                                 <option value="admin">管理者</option>
@@ -316,6 +340,7 @@
                         <td style="white-space:nowrap; text-align:right;">
                             <span v-if="vm_changed(member)" style="font-size:12px; color:#b26a00; margin-right:6px;">尚未儲存</span>
                             <button type="button" class="btn btn-sm btn-primary" :disabled="!vm_changed(member) || member.saving" v-on:click="vm_update(member)"><i class="fa fa-floppy-disk"></i> 儲存</button>
+                            <button v-if="member.locked" type="button" class="btn btn-sm btn-danger" style="margin-left:4px;" :disabled="member.unlocking" title="解除鎖定，讓這位會員可以再嘗試登入" v-on:click="vm_unlock(member)"><i class="fa fa-lock-open"></i> 解除鎖定</button>
                             <button type="button" class="btn btn-sm btn-outline-secondary" style="margin-left:4px;" title="重設這位會員的密碼" v-on:click="vm_openReset(member)"><i class="fa fa-key"></i> 重設密碼</button>
                         </td>
                     </tr>

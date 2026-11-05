@@ -17,7 +17,8 @@ namespace WhatSearch.Controllers
         {
             IUserService userSrv = Ioc.Get<IUserService>();
             string message;
-            bool success = userSrv.Login(Response, model?.name, model?.password, config.Login.CookieDays, out message);
+            string clientIp = ClientIpResolver.Resolve(HttpContext, config.Abnormal?.TrustedProxies);
+            bool success = userSrv.Login(Response, model?.name, model?.password, config.Login.CookieDays, clientIp, out message);
             return new
             {
                 success,
