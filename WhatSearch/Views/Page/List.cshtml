@@ -471,13 +471,11 @@
             <template id="search-component" v-if="searchIsVisible">
                 <div class="search-component-wrapper" style="position:relative; flex-grow: 1">
                     <input type="text" id="search-component-keyword" ref="myText" v-model="keyword"
-                        v-on:keyup.enter="doSearch" 
+                        v-on:input="vm_searchInput($event)"
+                        v-on:keyup.enter="vm_searchEnter"
                         v-on:click="$event.target.select()"
+                        enterkeyhint="search" autocomplete="off"
                         placeholder="什麼" class="form-control search-component-input" />
-                    <button v-on:click="doSearch" class="btn btn-success"
-                            style="position:absolute; right:0px; top:0px">
-                        <i class="fa fa-search"></i>
-                    </button>
                 </div>
             </template>
         </div>
@@ -1153,6 +1151,9 @@
                     keyword: '',
                     footerMessage: '',
                     searchPerformed: false,
+                    // 邊打邊搜：停止輸入後延遲一下才查（searchTimer）；seq 用來丟掉過期的回應（慢的舊查詢不能蓋掉新的結果）
+                    searchTimer: null,
+                    searchSeq: 0,
                     loading: false,
                     menuOpen: false,
                     pendingPlayId: null,
@@ -4140,25 +4141,68 @@
                 showKeyword() {
                     console.log('k=>' + this.keyword);
                 },
-                doSearch(k) {
-                    console.log('begin search, data:' + JSON.stringify({ 'q': this.keyword }));
-                    if(!this.keyword) {
-                        alert('請輸入');
+                // 邊打邊搜：輸入法組字中（還沒確定的字）不查；停止輸入 400 毫秒後才查；清空就清掉結果；
+                // 太短的不查（中日文 1 個字就夠，英數至少 2 個字），要搜按 Enter
+                vm_searchInput(evt) {
+                    if (evt && evt.isComposing) {
                         return;
                     }
+                    window.clearTimeout(this.searchTimer);
+                    let text = ((evt && evt.target ? evt.target.value : this.keyword) || '').trim();
+                    if (text.length === 0) {
+                        this.vm_clearSearch();
+                        return;
+                    }
+                    if (text.length < 2 && !/[^\x00-\x7F]/.test(text)) {
+                        return;
+                    }
+                    this.searchTimer = window.setTimeout(() => this.doSearch(text, true), 400);
+                },
+                vm_searchEnter() {
+                    this.doSearch(null, false);
+                },
+                vm_clearSearch() {
+                    window.clearTimeout(this.searchTimer);
+                    this.searchSeq++;
+                    this.loading = false;
+                    this.allItems = [];
+                    this.footerMessage = '';
+                    this.searchPerformed = false;
+                },
+                // k 是字串時（上一頁回到某次搜尋、邊打邊搜）就用它，否則用輸入框目前的字；live 表示是邊打邊搜觸發的
+                doSearch(k, live) {
+                    window.clearTimeout(this.searchTimer);
+                    let keyword = typeof k === 'string' ? k : this.keyword;
+                    if (typeof k === 'string' && !live) {
+                        this.keyword = k;
+                    }
+                    keyword = (keyword || '').trim();
+                    if (!keyword) {
+                        this.vm_clearSearch();
+                        return;
+                    }
+                    console.log('begin search, data:' + JSON.stringify({ 'q': keyword }));
                     this.searchIsVisible = true;
                     this.loading = true;
-                    api.search(this.keyword).then((res) => {
+                    let seq = ++this.searchSeq;
+                    api.search(keyword).then((res) => {
+                        if (seq !== this.searchSeq) {
+                            return;
+                        }
                         var data = res.data;
-                        this.getSearchResult(this.keyword, data.items, data.message);
+                        this.getSearchResult(keyword, data.items, data.message, live === true);
                     }).finally(() => {
-                        this.loading = false;
+                        if (seq === this.searchSeq) {
+                            this.loading = false;
+                        }
                     });
-                    this.$nextTick(()=>{
-                        document.querySelector('#search-component-keyword').focus();
-                    });
+                    if (!live) {
+                        this.$nextTick(()=>{
+                            document.querySelector('#search-component-keyword').focus();
+                        });
+                    }
                 },
-                getSearchResult(keyword, items, message) {
+                getSearchResult(keyword, items, message, live) {
                     this.notFound = null;
                     this.loadError = '';
                     this.favView = false;
@@ -4168,11 +4212,19 @@
                     this.activeFilter = null;
                     this.footerMessage = message;
                     this.searchPerformed = true;
-                    let searchUrl = '/page?search=' + keyword;
+                    let searchUrl = '/page?search=' + encodeURIComponent(keyword);
                     let state = {'keyword': keyword};
-                    console.log('push-state:' + searchUrl);
-                    window.history.pushState(state,'', searchUrl);
-
+                    // 歷史紀錄：已經在某次搜尋的紀錄上時，邊打邊搜只更新這一筆（不然「上一頁」要按很多次）；
+                    // 從瀏覽進搜尋的第一次新增一筆；Enter 則是「這次要留著」，關鍵字不同才新增
+                    let cur = window.history.state;
+                    let inSearch = !!(cur && cur.keyword != null);
+                    let replace = live ? inSearch : (inSearch && cur.keyword === keyword);
+                    console.log((replace ? 'replace-state:' : 'push-state:') + searchUrl);
+                    if (replace) {
+                        window.history.replaceState(state, '', searchUrl);
+                    } else {
+                        window.history.pushState(state, '', searchUrl);
+                    }
                 }
             }
         };
