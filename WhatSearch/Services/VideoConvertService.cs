@@ -28,6 +28,40 @@ namespace WhatSearch.Services
         bool Cancel(string jobId);
         /// <summary>清掉已結束（完成、失敗、已取消）的紀錄，排隊中與轉換中的不動；回傳清掉幾筆</summary>
         int ClearFinished();
+        /// <summary>讀 CUE 檔，回傳拆軌計畫（專輯、曲目、輸出資料夾、已存在幾首）；不合格回傳 null 並說明原因</summary>
+        CuePlan PreviewCue(string cuePath, out string error);
+        /// <summary>把一個 CUE 檔排進佇列：依曲目切出 MP3，放到 CUE 旁邊的 Disc N 資料夾；不合格回傳 null 並說明原因</summary>
+        ConvertJob EnqueueCue(string cuePath, string by, out string error);
+    }
+
+    public class CuePlanTrack
+    {
+        public int Number { get; set; }
+        public string Title { get; set; }
+        public string FileName { get; set; }
+        /// <summary>起點與長度（秒）；最後一軌長度為 null（到檔案結尾）</summary>
+        public double Start { get; set; }
+        public double? Length { get; set; }
+        /// <summary>輸出檔已經存在（再執行時會略過）</summary>
+        public bool Exists { get; set; }
+        internal string Audio;
+        internal string Performer;
+    }
+
+    public class CuePlan
+    {
+        public string Cue { get; set; }
+        public string Album { get; set; }
+        public string Artist { get; set; }
+        public string Year { get; set; }
+        public string Genre { get; set; }
+        public string Audio { get; set; }
+        public string Folder { get; set; }
+        public int? Disc { get; set; }
+        public int Bitrate { get; set; }
+        public int ExistingCount { get; set; }
+        public List<CuePlanTrack> Tracks { get; set; } = new List<CuePlanTrack>();
+        internal string OutputDir;
     }
 
     public class ConvertFile
@@ -64,6 +98,8 @@ namespace WhatSearch.Services
         public const string StateDone = "done";
         public const string StateFailed = "failed";
         public const string StateCanceled = "canceled";
+        public const string KindMkv = "mkv";
+        public const string KindCue = "cue";
 
         public string Id { get; set; }
         public string FileId { get; set; }
@@ -75,6 +111,8 @@ namespace WhatSearch.Services
         /// <summary>失敗原因，或完成時的大小變化</summary>
         public string Message { get; set; }
         public string By { get; set; }
+        /// <summary>mkv（影片轉檔）或 cue（CUE 拆軌）</summary>
+        public string Kind { get; set; } = KindMkv;
         public long QueuedAt { get; set; }
         public long FinishedAt { get; set; }
 
@@ -395,11 +433,11 @@ namespace WhatSearch.Services
                 string error = null;
                 try
                 {
-                    error = Convert(job);
+                    error = job.Kind == ConvertJob.KindCue ? SplitCue(job) : Convert(job);
                 }
                 catch (Exception ex)
                 {
-                    logger.Warn(ex, "MKV 轉檔發生例外 {0}", job.FullPath);
+                    logger.Warn(ex, "轉檔發生例外 {0}", job.FullPath);
                     error = "發生例外：" + ex.Message;
                 }
                 lock (gate)
@@ -422,6 +460,348 @@ namespace WhatSearch.Services
                     }
                 }
             }
+        }
+
+        // ---------- CUE 拆軌 ----------
+
+        const long MaxCueBytes = 1024 * 1024;
+        static readonly string[] CueAudioExts = { ".flac", ".wav", ".wv", ".ape", ".tta", ".m4a" };
+
+        public CuePlan PreviewCue(string cuePath, out string error)
+        {
+            return BuildCuePlan(cuePath, out error);
+        }
+
+        CuePlan BuildCuePlan(string cuePath, out string error)
+        {
+            error = null;
+            if (Enabled == false)
+            {
+                error = "伺服器沒有設定 ffmpeg";
+                return null;
+            }
+            if (string.IsNullOrEmpty(cuePath) || File.Exists(cuePath) == false)
+            {
+                error = "找不到這個檔案";
+                return null;
+            }
+            FileInfo cue = new FileInfo(cuePath);
+            if (cue.Extension.Equals(".cue", StringComparison.OrdinalIgnoreCase) == false)
+            {
+                error = "只能處理 CUE 檔";
+                return null;
+            }
+            if (cue.Length > MaxCueBytes)
+            {
+                error = "CUE 檔太大，不像是正常的 CUE";
+                return null;
+            }
+            CueSheet sheet;
+            try
+            {
+                sheet = CueSheet.Parse(File.ReadAllBytes(cue.FullName));
+            }
+            catch (Exception ex)
+            {
+                logger.Warn(ex, "讀取 CUE 失敗 {0}", cue.FullName);
+                error = "讀取 CUE 失敗：" + ex.Message;
+                return null;
+            }
+            if (sheet.Tracks.Count == 0)
+            {
+                error = "CUE 裡找不到可用的曲目（需要 TRACK 與 INDEX 01）";
+                return null;
+            }
+            // 每一軌的音檔：CUE 的 FILE 找不到時，退而求其次找同名的音檔
+            Dictionary<string, string> audioByCueName = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            foreach (string fileName in sheet.Tracks.Select(t => t.File ?? string.Empty).Distinct(StringComparer.OrdinalIgnoreCase))
+            {
+                string found = FindAudio(cue, fileName);
+                if (found == null)
+                {
+                    error = "找不到音檔「" + (fileName.Length == 0 ? "（CUE 沒有 FILE）" : fileName) + "」，請確認它和 CUE 在同一個資料夾";
+                    return null;
+                }
+                audioByCueName[fileName] = found;
+            }
+            string firstAudio = audioByCueName[sheet.Tracks[0].File ?? string.Empty];
+            string folderName = sheet.FolderName(cue.Name, Path.GetFileName(firstAudio));
+            int width = Math.Max(2, sheet.Tracks.Max(t => t.Number).ToString(CultureInfo.InvariantCulture).Length);
+            int? disc = null;
+            System.Text.RegularExpressions.Match dm = System.Text.RegularExpressions.Regex.Match(folderName, @"^Disc (\d+)$");
+            if (dm.Success)
+            {
+                disc = int.Parse(dm.Groups[1].Value, CultureInfo.InvariantCulture);
+            }
+            string album = sheet.AlbumName();
+            if (album.Length == 0)
+            {
+                album = cue.Directory.Name;
+            }
+            string year = sheet.Date;
+            if (string.IsNullOrWhiteSpace(year) == false && year.Length >= 4)
+            {
+                year = year.Substring(0, 4);
+            }
+            CuePlan plan = new CuePlan
+            {
+                Cue = cue.Name,
+                Album = album,
+                Artist = sheet.Performer,
+                Year = year,
+                Genre = sheet.Genre,
+                Audio = Path.GetFileName(firstAudio),
+                Folder = folderName,
+                Disc = disc,
+                Bitrate = Math.Max(32, config.Transcode.Bitrate),
+                OutputDir = Path.Combine(cue.DirectoryName, folderName)
+            };
+            HashSet<string> usedNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (CueTrack t in sheet.Tracks)
+            {
+                string fileName = sheet.TrackFileName(t, width);
+                if (usedNames.Add(fileName) == false)
+                {
+                    error = "CUE 裡有重複的曲號 " + t.Number + "，無法決定檔名";
+                    return null;
+                }
+                CuePlanTrack pt = new CuePlanTrack
+                {
+                    Number = t.Number,
+                    Title = string.IsNullOrWhiteSpace(t.Title) ? "Track " + t.Number.ToString(CultureInfo.InvariantCulture) : t.Title,
+                    FileName = fileName,
+                    Start = t.Start,
+                    Length = t.End.HasValue ? t.End.Value - t.Start : (double?)null,
+                    Audio = audioByCueName[t.File ?? string.Empty],
+                    Performer = string.IsNullOrWhiteSpace(t.Performer) ? sheet.Performer : t.Performer
+                };
+                pt.Exists = File.Exists(Path.Combine(plan.OutputDir, fileName));
+                if (pt.Exists)
+                {
+                    plan.ExistingCount++;
+                }
+                plan.Tracks.Add(pt);
+            }
+            return plan;
+        }
+
+        static string FindAudio(FileInfo cue, string cueFileName)
+        {
+            DirectoryInfo dir = cue.Directory;
+            string name = Path.GetFileName((cueFileName ?? string.Empty).Replace('\\', '/').TrimEnd('/'));
+            try
+            {
+                if (name.Length > 0)
+                {
+                    string exact = Path.Combine(dir.FullName, name);
+                    if (File.Exists(exact))
+                    {
+                        return exact;
+                    }
+                    FileInfo ci = dir.EnumerateFiles().FirstOrDefault(f => string.Equals(f.Name, name, StringComparison.OrdinalIgnoreCase));
+                    if (ci != null)
+                    {
+                        return ci.FullName;
+                    }
+                }
+                string baseName = Path.GetFileNameWithoutExtension(cue.Name);
+                FileInfo same = dir.EnumerateFiles().FirstOrDefault(f => string.Equals(Path.GetFileNameWithoutExtension(f.Name), baseName, StringComparison.OrdinalIgnoreCase)
+                    && CueAudioExts.Contains(f.Extension, StringComparer.OrdinalIgnoreCase));
+                return same?.FullName;
+            }
+            catch (Exception ex)
+            {
+                logger.Warn(ex, "尋找 CUE 的音檔失敗 {0}", cue.FullName);
+                return null;
+            }
+        }
+
+        public ConvertJob EnqueueCue(string cuePath, string by, out string error)
+        {
+            CuePlan plan = BuildCuePlan(cuePath, out error);
+            if (plan == null)
+            {
+                return null;
+            }
+            if (plan.ExistingCount >= plan.Tracks.Count)
+            {
+                error = "「" + plan.Folder + "」裡的 " + plan.Tracks.Count + " 首都已經存在，不需要再轉";
+                return null;
+            }
+            FileInfo cue = new FileInfo(cuePath);
+            lock (gate)
+            {
+                if (jobs.Any(j => string.Equals(j.FullPath, cue.FullName, StringComparison.OrdinalIgnoreCase)
+                    && (j.State == ConvertJob.StatePending || j.State == ConvertJob.StateRunning)))
+                {
+                    error = "已經在佇列中";
+                    return null;
+                }
+                ConvertJob job = new ConvertJob
+                {
+                    Id = (++nextId).ToString(CultureInfo.InvariantCulture),
+                    FileId = fimgr.GetIdByFilePath(cue.FullName),
+                    Name = cue.Name,
+                    Folder = cue.Directory.Name,
+                    Kind = ConvertJob.KindCue,
+                    State = ConvertJob.StatePending,
+                    By = by,
+                    QueuedAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
+                    FullPath = cue.FullName
+                };
+                jobs.Add(job);
+                TrimFinished();
+                if (worker == null)
+                {
+                    worker = new Thread(WorkLoop) { IsBackground = true, Name = "VideoConvertWorker" };
+                    worker.Start();
+                }
+                Monitor.PulseAll(gate);
+                return job;
+            }
+        }
+
+        /// <summary>回傳 null 表示成功（或已取消），否則是失敗原因；已經轉好的曲目會留著，原始 FLAC 與 CUE 不動</summary>
+        string SplitCue(ConvertJob job)
+        {
+            string error;
+            CuePlan plan = BuildCuePlan(job.FullPath, out error);
+            if (plan == null)
+            {
+                return error;
+            }
+            Directory.CreateDirectory(plan.OutputDir);
+            Stopwatch watch = Stopwatch.StartNew();
+            int made = 0, skipped = 0, n = plan.Tracks.Count;
+            for (int i = 0; i < n; i++)
+            {
+                if (job.CancelRequested)
+                {
+                    return null;
+                }
+                CuePlanTrack t = plan.Tracks[i];
+                string output = Path.Combine(plan.OutputDir, t.FileName);
+                job.Progress = Math.Min(99, i * 100 / n);
+                if (File.Exists(output))
+                {
+                    skipped++;
+                    continue;
+                }
+                string tmp = output + ".tmp";
+                try
+                {
+                    string err = RunCueTrack(job, plan, t, n, tmp);
+                    if (job.CancelRequested)
+                    {
+                        return null;
+                    }
+                    if (err != null)
+                    {
+                        return "第 " + t.Number + " 軌「" + t.Title + "」" + err;
+                    }
+                    FileInfo fi = new FileInfo(tmp);
+                    if (fi.Exists == false || fi.Length == 0)
+                    {
+                        return "第 " + t.Number + " 軌「" + t.Title + "」ffmpeg 沒有產生輸出檔";
+                    }
+                    File.Move(tmp, output);
+                    made++;
+                }
+                finally
+                {
+                    try { if (File.Exists(tmp)) { File.Delete(tmp); } } catch { }
+                }
+            }
+            job.Message = string.Format("拆出 {0} 首到「{1}」{2}", made, plan.Folder, skipped > 0 ? "（略過 " + skipped + " 首已存在）" : string.Empty);
+            logger.Info("CUE 拆軌完成 {0}：{1}，耗時 {2:F1} 分鐘", job.FullPath, job.Message, watch.Elapsed.TotalMinutes);
+            return null;
+        }
+
+        string RunCueTrack(ConvertJob job, CuePlan plan, CuePlanTrack t, int total, string tmp)
+        {
+            CultureInfo inv = CultureInfo.InvariantCulture;
+            ProcessStartInfo psi = new ProcessStartInfo
+            {
+                FileName = config.Transcode.Ffmpeg,
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                RedirectStandardError = true,
+                RedirectStandardOutput = true,
+                RedirectStandardInput = true
+            };
+            List<string> args = new List<string> { "-nostdin", "-hide_banner", "-loglevel", "error", "-y" };
+            if (t.Start > 0)
+            {
+                args.Add("-ss");
+                args.Add(t.Start.ToString("F6", inv));
+            }
+            args.Add("-i");
+            args.Add(t.Audio);
+            if (t.Length.HasValue)
+            {
+                args.Add("-t");
+                args.Add(t.Length.Value.ToString("F6", inv));
+            }
+            args.AddRange(new[] { "-vn", "-map", "0:a:0", "-map_metadata", "-1", "-c:a", "libmp3lame", "-b:a", plan.Bitrate.ToString(inv) + "k", "-id3v2_version", "3" });
+            AddTag(args, "title", t.Title);
+            AddTag(args, "artist", t.Performer);
+            AddTag(args, "album_artist", plan.Artist);
+            AddTag(args, "album", plan.Album);
+            AddTag(args, "track", t.Number.ToString(inv) + "/" + total.ToString(inv));
+            AddTag(args, "date", plan.Year);
+            AddTag(args, "genre", plan.Genre);
+            if (plan.Disc.HasValue)
+            {
+                AddTag(args, "disc", plan.Disc.Value.ToString(inv));
+            }
+            args.AddRange(new[] { "-f", "mp3", tmp });
+            foreach (string a in args)
+            {
+                psi.ArgumentList.Add(a);
+            }
+            using (Process p = Process.Start(psi))
+            {
+                try { p.PriorityClass = ProcessPriorityClass.BelowNormal; } catch { }
+                StringBuilder err = new StringBuilder();
+                p.ErrorDataReceived += (s, e) => { if (e.Data != null && err.Length < 2000) { err.AppendLine(e.Data); } };
+                p.OutputDataReceived += (s, e) => { };
+                lock (gate)
+                {
+                    current = p;
+                }
+                p.BeginErrorReadLine();
+                p.BeginOutputReadLine();
+                if (job.CancelRequested)
+                {
+                    try { p.Kill(true); } catch { }
+                }
+                p.WaitForExit();
+                lock (gate)
+                {
+                    current = null;
+                }
+                if (job.CancelRequested)
+                {
+                    return null;
+                }
+                if (p.ExitCode != 0)
+                {
+                    string detail = err.ToString().Trim();
+                    logger.Warn("CUE 拆軌失敗 {0}：ffmpeg 結束碼 {1} {2}", t.Audio, p.ExitCode, detail);
+                    return "ffmpeg 失敗（結束碼 " + p.ExitCode + "）" + (detail.Length == 0 ? string.Empty : "：" + FirstLine(detail));
+                }
+            }
+            return null;
+        }
+
+        static void AddTag(List<string> args, string key, string value)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+            {
+                return;
+            }
+            args.Add("-metadata");
+            args.Add(key + "=" + value.Trim());
         }
 
         // ---------- 轉檔 ----------
