@@ -27,6 +27,14 @@ namespace WhatSearch.Services
         RatingInfo ResolveAlbum(string folderName);
         /// <summary>列表上的專輯資料夾：已評分才把評分填進 AlbumRating</summary>
         void ApplyAlbumListRating(FileInfoView view, string folderFullPath);
+        /// <summary>啟動資料夾改名的監看：評分記錄跟著新名稱走（沒啟用評分就什麼都不做）</summary>
+        void StartWatch();
+        /// <summary>記錄總筆數（不掃資料夾）</summary>
+        int Count();
+        /// <summary>掃描分享根，找出評分記錄裡對不到資料夾的項目（要走訪資料夾，網路磁碟上會慢，只在管理者要求時才做）</summary>
+        RatingScanResult Scan();
+        /// <summary>刪除指定的髒資料（會重新掃描，只刪仍然對不到資料夾的；刪之前先備份 ratings.json）。回傳實際刪除筆數</summary>
+        int DeleteOrphans(IEnumerable<string> keys, out string backupName);
     }
 
     public class RatingInfo
@@ -212,16 +220,258 @@ namespace WhatSearch.Services
             {
                 var all = Load();
                 all[key] = rating;
+                Save(all);
+            }
+        }
+
+        // 呼叫端要自己持有 thisLock
+        void Save(Dictionary<string, double> all)
+        {
+            try
+            {
+                // 先寫暫存檔再取代，避免寫到一半當掉把評分清空；檔案被防毒等程式暫時鎖住時會自動重試
+                SafeFile.WriteAllTextAtomic(DataPath(), JsonHelper.Serialize(all, indented: true));
+            }
+            catch (Exception ex)
+            {
+                logger.Warn(ex, "寫入 ratings.json 失敗");
+                throw;
+            }
+        }
+
+        // 與 Resolve 相同的 key 規則：去掉結尾星等、空白收斂
+        static string AnimeKey(string folderName)
+        {
+            string plain = SuffixRegex.Replace(folderName ?? string.Empty, string.Empty).Trim();
+            return SpaceRegex.Replace(plain, " ");
+        }
+
+        static string AlbumKey(string folderName)
+        {
+            return AlbumKeyPrefix + SpaceRegex.Replace((folderName ?? string.Empty).Trim(), " ");
+        }
+
+        public int Count()
+        {
+            lock (thisLock)
+            {
+                return Load().Count;
+            }
+        }
+
+        // ---------- 資料夾改名：評分記錄跟著走 ----------
+
+        static List<FileSystemWatcher> watchers = new List<FileSystemWatcher>();
+
+        public void StartWatch()
+        {
+            bool anime = config.Rating != null && config.Rating.Shares != null && config.Rating.Shares.Count > 0;
+            bool album = config.Rating != null && config.Rating.Albums != null && config.Rating.Albums.Shares != null && config.Rating.Albums.Shares.Count > 0;
+            if ((anime || album) == false || config.Folders == null)
+            {
+                return;
+            }
+            var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            if (anime) { foreach (string n in config.Rating.Shares) { names.Add(n); } }
+            if (album) { foreach (string n in config.Rating.Albums.Shares) { names.Add(n); } }
+            foreach (FolderConfig f in config.Folders.Where(t => t != null && names.Contains(t.Title ?? string.Empty)))
+            {
                 try
                 {
-                    // 先寫暫存檔再取代，避免寫到一半當掉把評分清空；檔案被防毒等程式暫時鎖住時會自動重試
-                    SafeFile.WriteAllTextAtomic(DataPath(), JsonHelper.Serialize(all, indented: true));
+                    var w = new FileSystemWatcher(f.Path)
+                    {
+                        IncludeSubdirectories = true,
+                        NotifyFilter = NotifyFilters.DirectoryName,
+                        InternalBufferSize = 64 * 1024
+                    };
+                    string title = f.Title;
+                    w.Renamed += (s, e) => OnFolderRenamed(e.OldFullPath, e.FullPath);
+                    w.Error += (s, e) => logger.Warn("評分：{0} 的檔案監看出錯（{1}），改名可能沒有跟上；可到「評分管理」檢查", title, e.GetException() == null ? "?" : e.GetException().Message);
+                    w.EnableRaisingEvents = true;
+                    watchers.Add(w);
+                    logger.Info("評分：監看 {0} 的資料夾改名", title);
                 }
                 catch (Exception ex)
                 {
-                    logger.Warn(ex, "寫入 ratings.json 失敗");
-                    throw;
+                    logger.Warn("評分：{0} 的檔案監看啟動失敗（{1}），改名不會自動跟上", f.Title, ex.Message);
                 }
+            }
+        }
+
+        // 事件在背景執行緒，沒接住的例外會讓整個程式結束
+        void OnFolderRenamed(string oldPath, string newPath)
+        {
+            try
+            {
+                if (Directory.Exists(newPath) == false)
+                {
+                    return;
+                }
+                string oldName = Path.GetFileName(oldPath.TrimEnd('\\', '/'));
+                string newName = Path.GetFileName(newPath.TrimEnd('\\', '/'));
+                if (IsRateable(newPath))
+                {
+                    MoveKey(AnimeKey(oldName), AnimeKey(newName));
+                }
+                if (IsAlbumShare(newPath))
+                {
+                    MoveKey(AlbumKey(oldName), AlbumKey(newName));
+                }
+            }
+            catch (Exception ex)
+            {
+                logger.Warn(ex, "評分：處理資料夾改名失敗：{0} → {1}", oldPath, newPath);
+            }
+        }
+
+        void MoveKey(string oldKey, string newKey)
+        {
+            if (oldKey == newKey)
+            {
+                return;
+            }
+            lock (thisLock)
+            {
+                var all = Load();
+                double v;
+                if (all.TryGetValue(oldKey, out v) == false)
+                {
+                    return;
+                }
+                if (all.ContainsKey(newKey))
+                {
+                    logger.Info("評分：「{0}」改名為「{1}」，但新名稱已有評分，兩筆都保留（舊的可到「評分管理」刪除）", oldKey, newKey);
+                    return;
+                }
+                all.Remove(oldKey);
+                all[newKey] = v;
+                Save(all);
+                logger.Info("評分：資料夾改名，評分 {0} 從「{1}」跟到「{2}」", v, oldKey, newKey);
+            }
+        }
+
+        // ---------- 管理：找出對不到資料夾的評分 ----------
+
+        public RatingScanResult Scan()
+        {
+            var result = new RatingScanResult();
+            Dictionary<string, double> snapshot;
+            lock (thisLock)
+            {
+                snapshot = new Dictionary<string, double>(Load(), StringComparer.Ordinal);
+            }
+            result.Total = snapshot.Count;
+
+            HashSet<string> animeKeys = null, albumKeys = null;
+            var rc = config.Rating;
+            if (rc != null && rc.Shares != null && rc.Shares.Count > 0)
+            {
+                animeKeys = CollectKeys(rc.Shares, Math.Max(1, rc.Depth), true, AnimeKey, "動畫", result);
+                result.AnimeChecked = animeKeys != null;
+            }
+            if (rc != null && rc.Albums != null && rc.Albums.Shares != null && rc.Albums.Shares.Count > 0)
+            {
+                albumKeys = CollectKeys(rc.Albums.Shares, int.MaxValue, false, AlbumKey, "專輯", result);
+                result.AlbumChecked = albumKeys != null;
+            }
+            foreach (var kv in snapshot.OrderBy(t => t.Key, StringComparer.CurrentCultureIgnoreCase))
+            {
+                bool isAlbum = kv.Key.StartsWith(AlbumKeyPrefix, StringComparison.Ordinal);
+                var known = isAlbum ? albumKeys : animeKeys;
+                if (known == null || known.Contains(kv.Key))
+                {
+                    continue;
+                }
+                result.Orphans.Add(new RatingOrphan
+                {
+                    Key = kv.Key,
+                    Kind = isAlbum ? "album" : "anime",
+                    Name = isAlbum ? kv.Key.Substring(AlbumKeyPrefix.Length) : kv.Key,
+                    Rating = kv.Value
+                });
+            }
+            return result;
+        }
+
+        /// <summary>走訪分享根，回傳目前存在的資料夾所對應的 key 集合；任何一個分享根讀不到（沒掛載、權限）就回傳 null（不可驗證，絕不能把全部評分當髒資料）</summary>
+        HashSet<string> CollectKeys(List<string> shareNames, int depth, bool exactDepth, Func<string, string> keyOf, string label, RatingScanResult result)
+        {
+            var keys = new HashSet<string>(StringComparer.Ordinal);
+            foreach (string shareName in shareNames)
+            {
+                FolderConfig root = (config.Folders ?? new List<FolderConfig>()).FirstOrDefault(f => f != null && string.Equals(f.Title, shareName, StringComparison.OrdinalIgnoreCase));
+                if (root == null || string.IsNullOrEmpty(root.Path) || Directory.Exists(root.Path) == false)
+                {
+                    result.Errors.Add(label + "：找不到分享根「" + shareName + "」（沒掛載或路徑不存在），所以不檢查" + label + "評分");
+                    return null;
+                }
+                try
+                {
+                    Walk(root.Path, 1, depth, exactDepth, keyOf, keys);
+                }
+                catch (Exception ex)
+                {
+                    result.Errors.Add(label + "：讀取「" + shareName + "」失敗（" + ex.Message + "），所以不檢查" + label + "評分");
+                    return null;
+                }
+            }
+            return keys;
+        }
+
+        static void Walk(string dir, int level, int depth, bool exactDepth, Func<string, string> keyOf, HashSet<string> keys)
+        {
+            foreach (string sub in Directory.EnumerateDirectories(dir))
+            {
+                if (exactDepth == false || level == depth)
+                {
+                    keys.Add(keyOf(Path.GetFileName(sub)));
+                }
+                if (level < depth)
+                {
+                    Walk(sub, level + 1, depth, exactDepth, keyOf, keys);
+                }
+            }
+        }
+
+        public int DeleteOrphans(IEnumerable<string> keys, out string backupName)
+        {
+            backupName = null;
+            var wanted = new HashSet<string>(keys ?? Enumerable.Empty<string>(), StringComparer.Ordinal);
+            if (wanted.Count == 0)
+            {
+                return 0;
+            }
+            // 重新掃描：這段時間內如果資料夾又出現（或改名跟上了），就不刪
+            var scan = Scan();
+            var toDelete = scan.Orphans.Where(o => wanted.Contains(o.Key)).Select(o => o.Key).ToList();
+            if (toDelete.Count == 0)
+            {
+                return 0;
+            }
+            lock (thisLock)
+            {
+                var all = Load();
+                string path = DataPath();
+                if (File.Exists(path))
+                {
+                    string dir = Path.GetDirectoryName(path);
+                    backupName = "ratings.backup-" + DateTime.Now.ToString("yyyyMMdd-HHmmss") + ".json";
+                    File.Copy(path, Path.Combine(dir, backupName), true);
+                    // 備份只留最近 10 份
+                    var old = Directory.GetFiles(dir, "ratings.backup-*.json").OrderByDescending(t => t, StringComparer.Ordinal).Skip(10);
+                    foreach (string f in old)
+                    {
+                        try { File.Delete(f); } catch (Exception) { }
+                    }
+                }
+                int n = 0;
+                foreach (string k in toDelete)
+                {
+                    if (all.Remove(k)) { n++; }
+                }
+                Save(all);
+                logger.Info("評分：管理者刪除 {0} 筆找不到資料夾的評分（備份 {1}）", n, backupName ?? "無");
+                return n;
             }
         }
     }
