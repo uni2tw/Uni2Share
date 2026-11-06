@@ -1,0 +1,202 @@
+﻿@{
+    this.Layout = "_Layout.cshtml";
+}
+
+    <script type="text/javascript">
+        document.addEventListener('DOMContentLoaded', function () {
+            const App = {
+                data() {
+                    return {
+                        loaded: false,
+                        failed: false,
+                        data: null,
+                        scanning: false,
+                        deleting: false,
+                        scan: null,
+                        selected: {}
+                    }
+                },
+                computed: {
+                    enabled: function () {
+                        return !!this.data && (this.data.animeShares.length > 0 || this.data.albumShares.length > 0);
+                    },
+                    orphans: function () {
+                        return this.scan ? this.scan.orphans : [];
+                    },
+                    selectedKeys: function () {
+                        var self = this;
+                        return this.orphans.filter(function (o) { return self.selected[o.key]; }).map(function (o) { return o.key; });
+                    },
+                    allSelected: function () {
+                        return this.orphans.length > 0 && this.selectedKeys.length === this.orphans.length;
+                    }
+                },
+                mounted: function () {
+                    this.vm_load();
+                },
+                methods: {
+                    vm_home: function () {
+                        location.href = '/page';
+                    },
+                    vm_showAlert: function (text) {
+                        var el = document.querySelector('.alert');
+                        el.textContent = text;
+                        el.style.display = 'block';
+                        el.style.opacity = '1';
+                        window.setTimeout(function () {
+                            el.style.transition = 'opacity 0.4s';
+                            el.style.opacity = '0';
+                            window.setTimeout(function () {
+                                el.style.display = 'none';
+                            }, 400);
+                        }, 4000);
+                    },
+                    vm_load: function () {
+                        var self = this;
+                        axios.get('/admin/ratings/data').then(function (res) {
+                            // 登入失效時伺服器會轉去登入頁，拿到的是 HTML 不是資料
+                            if (!res.data || !Array.isArray(res.data.animeShares)) {
+                                self.failed = true;
+                                return;
+                            }
+                            self.data = res.data;
+                            self.failed = false;
+                            self.loaded = true;
+                        }).catch(function () {
+                            self.failed = true;
+                        });
+                    },
+                    vm_scan: function () {
+                        var self = this;
+                        self.scanning = true;
+                        axios.post('/admin/ratings/scan', {}).then(function (res) {
+                            if (!res.data || !Array.isArray(res.data.orphans)) {
+                                self.vm_showAlert('檢查失敗，請重新登入後再試');
+                                return;
+                            }
+                            self.scan = res.data;
+                            self.selected = {};
+                            self.data.total = res.data.total;
+                        }).catch(function () {
+                            self.vm_showAlert('檢查失敗，請稍後再試');
+                        }).finally(function () {
+                            self.scanning = false;
+                        });
+                    },
+                    vm_toggleAll: function () {
+                        var on = !this.allSelected, sel = {};
+                        this.orphans.forEach(function (o) { sel[o.key] = on; });
+                        this.selected = sel;
+                    },
+                    vm_delete: function () {
+                        var self = this, keys = this.selectedKeys;
+                        if (keys.length === 0) {
+                            return;
+                        }
+                        if (!window.confirm('確定要刪除選取的 ' + keys.length + ' 筆評分嗎？\n刪除前會先備份 ratings.json。')) {
+                            return;
+                        }
+                        self.deleting = true;
+                        axios.post('/admin/ratings/delete', { keys: keys }).then(function (res) {
+                            var d = res.data || {};
+                            self.vm_showAlert(d.message || '刪除失敗');
+                            if (d.success === 1) {
+                                // 伺服器已重新檢查過，沒刪到的（資料夾又找得到了）重新檢查才會正確顯示
+                                self.vm_scan();
+                            }
+                        }).catch(function () {
+                            self.vm_showAlert('刪除失敗，請稍後再試');
+                        }).finally(function () {
+                            self.deleting = false;
+                        });
+                    },
+                    vm_kind: function (kind) {
+                        return kind === 'album' ? '專輯' : '動畫';
+                    }
+                }
+            };
+            window.app = Vue.createApp(App).mount('#main');
+        });
+    </script>
+
+<body>
+    <div id="main" class="container" style="max-width:1000px; padding-top:16px; padding-bottom:40px;" v-cloak>
+        <div class="alert alert-info" style="display:none; margin-bottom:10px"></div>
+        <h1 class="h3" style="display:flex; align-items:center; gap:10px;">
+            <button type="button" class="btn btn-sm btn-info" v-on:click="vm_home()" title="回首頁"><i class="fa fa-home"></i></button>
+            評分管理
+            <span style="margin-left:auto; display:flex; gap:6px; flex-wrap:wrap; justify-content:flex-end;">
+                <a href="/admin" class="btn btn-sm btn-outline-secondary"><i class="fa fa-users"></i> 會員管理</a>
+                <a href="/admin/monitor" class="btn btn-sm btn-outline-secondary"><i class="fa fa-chart-line"></i> 播放監控</a>
+                <a href="/admin/security" class="btn btn-sm btn-outline-secondary"><i class="fa fa-shield-halved"></i> 異常請求</a>
+                <a href="/admin/convert" class="btn btn-sm btn-outline-secondary"><i class="fa fa-film"></i> MKV 轉檔</a>
+            </span>
+        </h1>
+        <div style="font-size:13px; color:#666; margin:0 0 12px 0; line-height:1.7;">
+            評分記在 <code>data\ratings.json</code>，以資料夾「名稱」對應。資料夾改名時系統會自動讓評分跟著新名稱走（需要伺服器正在執行、檔案監看有收到事件）；
+            名稱對不上的（伺服器沒開時改的名、已刪除、搬出分享根）會變成找不到資料夾的評分。「檢查」會走訪分享根的資料夾，網路磁碟上可能要一段時間；
+            刪除前會先備份 <code>ratings.json</code>（最近 10 份）。
+            <span v-if="failed" style="color:#dc3545;"><i class="fa fa-triangle-exclamation"></i> 載入失敗</span>
+        </div>
+
+        <div v-if="!loaded" style="color:#888; padding:20px 0;">載入中…</div>
+
+        <div v-else>
+            <div v-if="!enabled" style="color:#b26a00; padding:8px 0;">
+                <i class="fa fa-triangle-exclamation"></i> 目前沒有啟用評分（config 的 rating.shares／rating.albums.shares），沒有可檢查的項目。
+            </div>
+            <div v-else>
+                <div style="font-size:13px; color:#666; margin-bottom:10px; line-height:1.8;">
+                    共 <b>{{ data.total }}</b> 筆評分
+                    <span v-if="data.animeShares.length">；動畫分享根：{{ data.animeShares.join('、') }}</span>
+                    <span v-if="data.albumShares.length">；專輯分享根：{{ data.albumShares.join('、') }}</span>
+                </div>
+                <div style="display:flex; align-items:center; gap:6px; margin-bottom:10px; flex-wrap:wrap;">
+                    <button type="button" class="btn btn-sm btn-primary" :disabled="scanning || deleting" v-on:click="vm_scan()">
+                        <i class="fa" :class="scanning ? 'fa-spinner fa-spin' : 'fa-magnifying-glass'"></i> {{ scanning ? '檢查中…' : '檢查' }}
+                    </button>
+                    <button type="button" class="btn btn-sm btn-outline-danger" :disabled="selectedKeys.length === 0 || deleting || scanning" v-on:click="vm_delete()">
+                        <i class="fa fa-trash"></i> 刪除選取的 {{ selectedKeys.length }} 筆
+                    </button>
+                </div>
+
+                <div v-if="scan">
+                    <div v-for="e in scan.errors" :key="e" style="color:#b26a00; font-size:13px; margin-bottom:6px;">
+                        <i class="fa fa-triangle-exclamation"></i> {{ e }}
+                    </div>
+                    <div style="font-size:13px; color:#666; margin-bottom:6px;">
+                        <span v-if="scan.animeChecked || scan.albumChecked">
+                            已檢查{{ scan.animeChecked ? '動畫' : '' }}{{ scan.animeChecked && scan.albumChecked ? '、' : '' }}{{ scan.albumChecked ? '專輯' : '' }}；找不到資料夾的有 <b>{{ orphans.length }}</b> 筆
+                        </span>
+                    </div>
+                    <div v-if="(scan.animeChecked || scan.albumChecked) && orphans.length === 0" style="color:#198754; padding:10px 0;">
+                        <i class="fa fa-circle-check"></i> 沒有找不到資料夾的評分。
+                    </div>
+                    <div v-if="orphans.length > 0" class="table-responsive">
+                        <table class="table table-sm align-middle">
+                            <thead>
+                                <tr style="font-size:13px; color:#888;">
+                                    <th style="width:32px;"><input type="checkbox" :checked="allSelected" v-on:change="vm_toggleAll()" title="全選／取消"></th>
+                                    <th style="white-space:nowrap;">類型</th>
+                                    <th>名稱</th>
+                                    <th style="white-space:nowrap;">評分</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr v-for="o in orphans" :key="o.key">
+                                    <td><input type="checkbox" v-model="selected[o.key]"></td>
+                                    <td style="font-size:13px; white-space:nowrap;">
+                                        <span class="badge" :class="o.kind === 'album' ? 'bg-info' : 'bg-secondary'">{{ vm_kind(o.kind) }}</span>
+                                    </td>
+                                    <td style="word-break:break-all;">{{ o.name }}</td>
+                                    <td style="font-size:13px; white-space:nowrap;">{{ o.rating > 0 ? o.rating + ' 星' : '未評分' }}</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+                <div v-else style="color:#888; padding:10px 0;">按「檢查」找出找不到資料夾的評分。</div>
+            </div>
+        </div>
+    </div>
+</body>

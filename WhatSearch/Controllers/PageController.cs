@@ -305,6 +305,55 @@ namespace WhatSearch.Controllers
             return new { Success = 1, Cleared = n, Message = n > 0 ? string.Format("已清除 {0} 筆紀錄", n) : "沒有可清除的紀錄" };
         }
 
+        /// <summary>評分管理頁：找出對不到資料夾的評分（資料夾改名、刪除後留下的），讓管理者刪除</summary>
+        [Route("admin/ratings")]
+        [RoleAuthorize("Admin")]
+        public IActionResult RatingsPage()
+        {
+            return View("Ratings");
+        }
+
+        [HttpGet]
+        [Route("admin/ratings/data")]
+        [RoleAuthorize("Admin")]
+        public dynamic RatingsData()
+        {
+            var rc = config.Rating;
+            return new
+            {
+                total = Ioc.Get<IRatingService>().Count(),
+                animeShares = rc != null && rc.Shares != null ? rc.Shares : new List<string>(),
+                albumShares = rc != null && rc.Albums != null && rc.Albums.Shares != null ? rc.Albums.Shares : new List<string>()
+            };
+        }
+
+        /// <summary>要走訪分享根的資料夾，網路磁碟上可能要一段時間，所以只在管理者按「檢查」時才做</summary>
+        [HttpPost]
+        [Route("admin/ratings/scan")]
+        [RoleAuthorize("Admin")]
+        public dynamic RatingsScan()
+        {
+            return Ioc.Get<IRatingService>().Scan();
+        }
+
+        [HttpPost]
+        [Route("admin/ratings/delete")]
+        [RoleAuthorize("Admin")]
+        public dynamic RatingsDelete([FromBody] RatingsDeleteModel model)
+        {
+            if (model == null || model.Keys == null || model.Keys.Count == 0)
+            {
+                return new { Success = 0, Message = "沒有選取要刪除的項目" };
+            }
+            string backup;
+            int n = Ioc.Get<IRatingService>().DeleteOrphans(model.Keys, out backup);
+            if (n == 0)
+            {
+                return new { Success = 1, Deleted = 0, Message = "沒有刪除任何項目（它們可能已經找得到資料夾，或已被刪除）" };
+            }
+            return new { Success = 1, Deleted = n, Backup = backup, Message = "已刪除 " + n + " 筆" + (backup != null ? "，原檔備份在 data\\" + backup : "") };
+        }
+
         /// <summary>播放監控頁：誰正在播什麼、目前速率、今日流量、熱門內容、伺服器狀態</summary>
         [Route("admin/monitor")]
         [RoleAuthorize("Admin")]
@@ -472,5 +521,10 @@ namespace WhatSearch.Controllers
             public int fails { get; set; }
             public bool self { get; set; }
         }
+    }
+    public class RatingsDeleteModel
+    {
+        [System.Text.Json.Serialization.JsonPropertyName("keys")]
+        public List<string> Keys { get; set; }
     }
 }

@@ -62,6 +62,7 @@ namespace WhatSearch
 
             Ioc.Get<IReseekFolderJob>().Start();
             Ioc.Get<INewsService>().Start();
+            Ioc.Get<IRatingService>().StartWatch();
             IWebHostBuilder webHostBuilder = WebHost.CreateDefaultBuilder(args)
                 .UseKestrel(t =>
                 {

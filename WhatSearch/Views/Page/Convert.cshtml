@@ -167,7 +167,10 @@
         <h1 class="h3" style="display:flex; align-items:center; gap:10px;">
             <button type="button" class="btn btn-sm btn-info" v-on:click="vm_home()" title="回首頁"><i class="fa fa-home"></i></button>
             MKV 轉檔
-            <a href="/admin" class="btn btn-sm btn-outline-secondary" style="margin-left:auto;"><i class="fa fa-users"></i> 會員管理</a>
+            <span style="margin-left:auto; display:flex; gap:6px;">
+                <a href="/admin" class="btn btn-sm btn-outline-secondary"><i class="fa fa-users"></i> 會員管理</a>
+                <a href="/admin/ratings" class="btn btn-sm btn-outline-secondary"><i class="fa fa-star"></i> 評分管理</a>
+            </span>
         </h1>
         <div style="font-size:13px; color:#666; margin:0 0 12px 0; line-height:1.7;">
             這裡列出被標註「無法播放」的動畫。選擇要轉換的檔案後，系統會在伺服器上用 ffmpeg 把影片轉成瀏覽器能播的 H.264 8-bit、音訊轉成 AAC（原本就是 AAC 的直接複製），字幕與其它軌道保留，輸出仍是 MKV。
