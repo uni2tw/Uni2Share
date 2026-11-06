@@ -246,7 +246,7 @@ namespace WhatSearch.Controllers
             {
                 jobs = Ioc.Get<IVideoConvertService>().GetJobs().Select(j => new
                 {
-                    id = j.Id, fileId = j.FileId, name = j.Name, folder = j.Folder, state = j.State, progress = j.Progress,
+                    id = j.Id, fileId = j.FileId, name = j.Name, folder = j.Folder, kind = j.Kind, state = j.State, progress = j.Progress,
                     message = j.Message, by = j.By, queuedAt = j.QueuedAt, finishedAt = j.FinishedAt
                 })
             };
@@ -284,6 +284,43 @@ namespace WhatSearch.Controllers
                 }
             }
             return new { Success = queued > 0 ? 1 : 0, Queued = queued, Errors = errors, Message = queued > 0 ? string.Format("已排入 {0} 個檔案", queued) : "沒有排入任何檔案" };
+        }
+
+        /// <summary>點 CUE 檔時先預覽：解析出的專輯、曲目、輸出資料夾與已存在幾首</summary>
+        [HttpPost]
+        [Route("admin/convert/cue/preview")]
+        [RoleAuthorize("Admin")]
+        public dynamic CuePreview([FromBody] CueModel model)
+        {
+            string path = string.IsNullOrEmpty(model?.id) ? null : Ioc.Get<IFolderIdManager>().GetPath(model.id);
+            string error;
+            CuePlan plan = Ioc.Get<IVideoConvertService>().PreviewCue(path, out error);
+            if (plan == null)
+            {
+                return new { Success = 0, Message = error };
+            }
+            return new { Success = 1, Plan = plan };
+        }
+
+        /// <summary>把 CUE 排進佇列，依曲目切成 MP3 放到旁邊的 Disc N 資料夾</summary>
+        [HttpPost]
+        [Route("admin/convert/cue/enqueue")]
+        [RoleAuthorize("Admin")]
+        public dynamic CueEnqueue([FromBody] CueModel model)
+        {
+            string path = string.IsNullOrEmpty(model?.id) ? null : Ioc.Get<IFolderIdManager>().GetPath(model.id);
+            string by = (User.Identity as System.Security.Claims.ClaimsIdentity)?.Label;
+            if (string.IsNullOrEmpty(by))
+            {
+                by = User.Identity.Name;
+            }
+            string error;
+            ConvertJob job = Ioc.Get<IVideoConvertService>().EnqueueCue(path, by, out error);
+            if (job == null)
+            {
+                return new { Success = 0, Message = error };
+            }
+            return new { Success = 1, JobId = job.Id, Message = "已排入佇列" };
         }
 
         [HttpPost]
@@ -474,6 +511,11 @@ namespace WhatSearch.Controllers
         public class ConvertEnqueueModel
         {
             public List<string> ids { get; set; }
+        }
+
+        public class CueModel
+        {
+            public string id { get; set; }
         }
 
         public class ConvertCancelModel
