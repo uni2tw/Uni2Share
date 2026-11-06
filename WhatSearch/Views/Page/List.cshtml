@@ -1154,6 +1154,8 @@
                     // 邊打邊搜：停止輸入後延遲一下才查（searchTimer）；seq 用來丟掉過期的回應（慢的舊查詢不能蓋掉新的結果）
                     searchTimer: null,
                     searchSeq: 0,
+                    // 進搜尋之前的畫面（資料夾／新上架／我的最愛）；邊打邊搜把輸入清空時要回到這一頁
+                    preSearch: null,
                     loading: false,
                     menuOpen: false,
                     pendingPlayId: null,
@@ -1930,7 +1932,7 @@
                 vm_showNews: function (pushState, fromUrl) {
                     let self = this;
                     this.loading = true;
-                    api.news().then(res => {
+                    return api.news().then(res => {
                         if (fromUrl && res.data.enabled === false) {
                             location.replace('/page/');
                             return;
@@ -2521,7 +2523,7 @@
                 vm_showFavorites: function () {
                     let self = this;
                     this.loading = true;
-                    api.favoriteItems().then((res) => {
+                    return api.favoriteItems().then((res) => {
                         self.allItems = res.data.items;
                         self.favView = true;
                         self.newsView = false;
@@ -2807,7 +2809,7 @@
                 },
                 vm_getFolder: function (folder, pushState, revealPlaying) {
                     this.loading = true;
-                    api.folder(folder).then((res) => {
+                    return api.folder(folder).then((res) => {
                         var data = res.data;
                         if (data.notFound) {
                             this.vm_showNotFound(data, folder);
@@ -2818,7 +2820,9 @@
                         }
                         console.log('url to:' + data.url);
 
-                        if (pushState) {
+                        if (pushState === 'replace') {
+                            window.history.replaceState({ 'folder': folder }, '', data.url);
+                        } else if (pushState) {
                             let state = { 'folder': folder };
                             console.log('push-state:' + folder);
                             window.history.pushState(state, '', data.url);
@@ -4169,9 +4173,42 @@
                     window.clearTimeout(this.searchTimer);
                     this.searchSeq++;
                     this.loading = false;
-                    this.allItems = [];
-                    this.footerMessage = '';
+                    if (!this.searchPerformed) {
+                        // 還沒出現過搜尋結果（畫面還是原本那一頁），什麼都不用動
+                        return;
+                    }
+                    this.vm_restorePreSearch();
+                },
+                // 清空搜尋輸入：回到按搜尋之前的那一頁，搜尋列保持開著、游標留在輸入框（可以接著重打）
+                vm_restorePreSearch() {
+                    let pre = this.preSearch;
                     this.searchPerformed = false;
+                    if (!pre) {
+                        let last = '';
+                        try { last = window.localStorage.getItem('lastFolder') || ''; } catch (e) { }
+                        pre = { kind: 'folder', id: last, state: null, url: null };
+                    }
+                    if (pre.url) {
+                        window.history.replaceState(pre.state ? JSON.parse(JSON.stringify(pre.state)) : null, '', pre.url);    // 要複製成純物件（Vue 資料裡是代理，replaceState 不收）
+                    }
+                    let seq = this.searchSeq;
+                    let task = pre.kind === 'news' ? this.vm_showNews(false)
+                        : (pre.kind === 'fav' ? this.vm_showFavorites() : this.vm_getFolder(pre.id, 'replace'));
+                    Promise.resolve(task).then(() => {
+                        this.searchIsVisible = true;
+                        this.breadcrumbIsVisible = false;
+                        this.$nextTick(() => {
+                            let el = document.querySelector('#search-component-keyword');
+                            if (el) { el.focus(); }
+                        });
+                        if (seq !== this.searchSeq) {
+                            // 載入的期間又開始打字了：結果以新的搜尋為準
+                            let text = (this.keyword || '').trim();
+                            if (text) {
+                                this.doSearch(text, true);
+                            }
+                        }
+                    });
                 },
                 // k 是字串時（上一頁回到某次搜尋、邊打邊搜）就用它，否則用輸入框目前的字；live 表示是邊打邊搜觸發的
                 doSearch(k, live) {
@@ -4207,6 +4244,17 @@
                     }
                 },
                 getSearchResult(keyword, items, message, live) {
+                    let cur = window.history.state;
+                    let inSearch = !!(cur && cur.keyword != null);
+                    if (!inSearch) {
+                        // 從瀏覽進入搜尋：記下這一頁，清空輸入時回得來
+                        this.preSearch = {
+                            kind: this.newsView ? 'news' : (this.favView ? 'fav' : 'folder'),
+                            id: (cur && cur.folder != null) ? cur.folder : (window.localStorage.getItem('lastFolder') || ''),
+                            state: cur,
+                            url: location.pathname + location.search
+                        };
+                    }
                     this.notFound = null;
                     this.loadError = '';
                     this.favView = false;
@@ -4220,8 +4268,6 @@
                     let state = {'keyword': keyword};
                     // 歷史紀錄：已經在某次搜尋的紀錄上時，邊打邊搜只更新這一筆（不然「上一頁」要按很多次）；
                     // 從瀏覽進搜尋的第一次新增一筆；Enter 則是「這次要留著」，關鍵字不同才新增
-                    let cur = window.history.state;
-                    let inSearch = !!(cur && cur.keyword != null);
                     let replace = live ? inSearch : (inSearch && cur.keyword === keyword);
                     console.log((replace ? 'replace-state:' : 'push-state:') + searchUrl);
                     if (replace) {
