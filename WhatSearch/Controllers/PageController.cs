@@ -356,9 +356,18 @@ namespace WhatSearch.Controllers
         public dynamic RatingsData()
         {
             var rc = config.Rating;
+            IRatingService rating = Ioc.Get<IRatingService>();
+            RatingStats stats = rating.GetStats();
+            Dictionary<string, int> counts = stats.Users.ToDictionary(t => t.Name, t => t.Count, StringComparer.OrdinalIgnoreCase);
             return new
             {
-                total = Ioc.Get<IRatingService>().Count(),
+                total = rating.Count(),
+                legacy = stats.Legacy,
+                // 每位會員各評了幾筆（沒評過的是 0）；已經刪除的會員但還留有評分的也列出來，管理者才看得到
+                users = Ioc.Get<IUserService>().GetMembers()
+                    .Select(m => new { name = m.Name, display = m.DisplayName, count = counts.ContainsKey(m.Name) ? counts[m.Name] : 0, exists = true })
+                    .Concat(stats.Users.Where(u => Ioc.Get<IUserService>().GetMember(u.Name) == null).Select(u => new { name = u.Name, display = u.Name, count = u.Count, exists = false }))
+                    .OrderBy(t => t.name, StringComparer.CurrentCultureIgnoreCase),
                 animeShares = rc != null && rc.Shares != null ? rc.Shares : new List<string>(),
                 albumShares = rc != null && rc.Albums != null && rc.Albums.Shares != null ? rc.Albums.Shares : new List<string>()
             };
@@ -389,6 +398,34 @@ namespace WhatSearch.Controllers
                 return new { Success = 1, Deleted = 0, Message = "沒有刪除任何項目（它們可能已經找得到資料夾，或已被刪除）" };
             }
             return new { Success = 1, Deleted = n, Backup = backup, Message = "已刪除 " + n + " 筆" + (backup != null ? "，原檔備份在 data\\" + backup : "") };
+        }
+
+        /// <summary>把舊的共用評分（1.38.0 以前全站一份的 ratings.json）整份轉給某位會員，轉完清空；轉之前會備份</summary>
+        [HttpPost]
+        [Route("admin/ratings/transfer")]
+        [RoleAuthorize("Admin")]
+        public dynamic RatingsTransfer([FromBody] RatingsTransferModel model)
+        {
+            if (model == null || string.IsNullOrEmpty(model.To) || Ioc.Get<IUserService>().GetMember(model.To) == null)
+            {
+                return new { Success = 0, Message = "找不到這位會員" };
+            }
+            IRatingService rating = Ioc.Get<IRatingService>();
+            if (rating.GetStats().Legacy == 0)
+            {
+                return new { Success = 0, Message = "沒有舊的共用評分可以轉" };
+            }
+            int skipped;
+            string backup;
+            int moved = rating.TransferLegacy(Ioc.Get<IUserService>().GetMember(model.To).Name, model.Overwrite, out skipped, out backup);
+            return new
+            {
+                Success = 1,
+                Moved = moved,
+                Skipped = skipped,
+                Backup = backup,
+                Message = "已轉入 " + moved + " 筆" + (skipped > 0 ? "，略過 " + skipped + " 筆（對方已有自己的評分）" : string.Empty) + (backup != null ? "；舊檔備份在 data\\" + backup : string.Empty)
+            };
         }
 
         /// <summary>播放監控頁：誰正在播什麼、目前速率、今日流量、熱門內容、伺服器狀態</summary>
@@ -564,6 +601,15 @@ namespace WhatSearch.Controllers
             public bool self { get; set; }
         }
     }
+    public class RatingsTransferModel
+    {
+        [System.Text.Json.Serialization.JsonPropertyName("to")]
+        public string To { get; set; }
+        /// <summary>true：舊評分覆蓋對方已有的；false（預設）：對方已經評過的保留他自己的</summary>
+        [System.Text.Json.Serialization.JsonPropertyName("overwrite")]
+        public bool Overwrite { get; set; }
+    }
+
     public class RatingsDeleteModel
     {
         [System.Text.Json.Serialization.JsonPropertyName("keys")]

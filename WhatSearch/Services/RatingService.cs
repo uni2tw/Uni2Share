@@ -15,22 +15,28 @@ namespace WhatSearch.Services
     {
         /// <summary>這個資料夾是否可評分（依設定的分享根與層數）</summary>
         bool IsRateable(string folderFullPath);
-        /// <summary>把可評分資料夾的「顯示名稱（去掉星等後綴）、評分」填進檢視；不可評分就不動</summary>
-        void Apply(FileInfoView view, string folderFullPath);
-        /// <summary>資料夾名稱 → 評分用的名稱與有效評分（系統記錄優先，沒有就用名稱結尾的 (★★★☆)）</summary>
+        /// <summary>把可評分資料夾的「顯示名稱（去掉星等後綴）、這位使用者的評分」填進檢視；不可評分就不動</summary>
+        void Apply(FileInfoView view, string folderFullPath, string user);
+        /// <summary>資料夾名稱 → 評分用的名稱（Key、Plain 與使用者無關；Rating 沒有指定使用者，只看舊的共用評分與名稱後綴）</summary>
         RatingInfo Resolve(string folderName);
-        /// <summary>設定評分（0 = 未評分），key 為 Resolve 回傳的 Key</summary>
-        void Set(string key, double rating);
+        /// <summary>資料夾名稱 → 這位使用者的有效評分（優先順序：自己的評分 → 舊的共用評分 → 名稱結尾的 (★★★☆)）；user 為 null（未登入）就略過第一項</summary>
+        RatingInfo Resolve(string folderName, string user);
+        /// <summary>設定這位使用者的評分（0 = 未評分），key 為 Resolve 回傳的 Key</summary>
+        void Set(string key, double rating, string user);
         /// <summary>這個資料夾位在啟用專輯評分的分享根底下，而且不是分享根本身、也不是專輯裡的光碟或附屬資料夾（Disc 1、Scans…）；還要由呼叫端確認它是專輯</summary>
         bool IsAlbumShare(string folderFullPath);
         /// <summary>專輯名稱 → 評分用的名稱與評分（key 加 album| 前綴，與動畫分開）；沒有評分為 null</summary>
-        RatingInfo ResolveAlbum(string folderName);
-        /// <summary>列表上的專輯資料夾：已評分才把評分填進 AlbumRating</summary>
-        void ApplyAlbumListRating(FileInfoView view, string folderFullPath);
+        RatingInfo ResolveAlbum(string folderName, string user);
+        /// <summary>列表上的專輯資料夾：這位使用者已評分才把評分填進 AlbumRating</summary>
+        void ApplyAlbumListRating(FileInfoView view, string folderFullPath, string user);
         /// <summary>啟動資料夾改名的監看：評分記錄跟著新名稱走（沒啟用評分就什麼都不做）</summary>
         void StartWatch();
-        /// <summary>記錄總筆數（不掃資料夾）</summary>
+        /// <summary>記錄總筆數（舊的共用評分加上所有人的，不掃資料夾）</summary>
         int Count();
+        /// <summary>舊的共用評分筆數，以及每個使用者各有幾筆</summary>
+        RatingStats GetStats();
+        /// <summary>把舊的共用評分（ratings.json）轉給指定使用者：overwrite 為 false 時，該使用者已經評過的項目保留他自己的。轉完舊的共用評分會清空（轉之前先備份）。回傳轉入筆數，skipped 是因為已有自己的評分而略過的筆數</summary>
+        int TransferLegacy(string toUser, bool overwrite, out int skipped, out string backupName);
         /// <summary>掃描分享根，找出評分記錄裡對不到資料夾的項目（要走訪資料夾，網路磁碟上會慢，只在管理者要求時才做）</summary>
         RatingScanResult Scan();
         /// <summary>刪除指定的髒資料（會重新掃描，只刪仍然對不到資料夾的；刪之前先備份 ratings.json）。回傳實際刪除筆數</summary>
@@ -48,10 +54,12 @@ namespace WhatSearch.Services
     }
 
     /// <summary>
-    /// 動畫（追番）的星等評分，整個系統共用一份，存在 data/ratings.json（{ 名稱: 評分 }）。
+    /// 動畫（追番）與專輯的星等評分，每位使用者一份，存在 data/ratings.users.json（{ 使用者: { 名稱: 評分 } }）。
+    /// 1.38.0 以前是全站共用一份（data/ratings.json，{ 名稱: 評分 }）；那份現在當成「舊的共用評分」：
+    /// 使用者自己沒評過的項目暫時還是看得到它，管理者可以用「評分管理」頁把它整份轉給某位使用者（轉完清空）。
     /// 評分記在系統裡而不是改資料夾名稱，所以不會改變資料夾 id（續播進度、收藏、書籤都不受影響）；
     /// key 是去掉結尾星等的名稱，動畫搬到別的資料夾評分仍然跟著走。
-    /// 系統裡沒有評分時，沿用資料夾名稱結尾的「(★★★☆)」（★ 算 1、結尾的 ☆ 算 0.5）當預設值。
+    /// 都沒有評分時，沿用資料夾名稱結尾的「(★★★☆)」（★ 算 1、結尾的 ☆ 算 0.5）當預設值。
     /// </summary>
     public class RatingService : IRatingService
     {
@@ -62,11 +70,63 @@ namespace WhatSearch.Services
         static readonly Regex SpaceRegex = new Regex(@"\s+", RegexOptions.Compiled);
 
         readonly SystemConfig config = Ioc.GetConfig();
-        Dictionary<string, double> cache;
+        Dictionary<string, double> cache;                                   // 舊的共用評分（ratings.json）
+        Dictionary<string, Dictionary<string, double>> userCache;           // 使用者 → { key: 評分 }（ratings.users.json）
 
         static string DataPath()
         {
             return Helper.GetRelativePath("data", "ratings.json");
+        }
+
+        static string UsersPath()
+        {
+            return Helper.GetRelativePath("data", "ratings.users.json");
+        }
+
+        // 呼叫端要自己持有 thisLock
+        Dictionary<string, Dictionary<string, double>> LoadUsers()
+        {
+            if (userCache != null)
+            {
+                return userCache;
+            }
+            userCache = new Dictionary<string, Dictionary<string, double>>(StringComparer.OrdinalIgnoreCase);
+            try
+            {
+                string path = UsersPath();
+                if (File.Exists(path))
+                {
+                    var loaded = JsonHelper.Deserialize<Dictionary<string, Dictionary<string, double>>>(File.ReadAllText(path));
+                    if (loaded != null)
+                    {
+                        foreach (var kv in loaded)
+                        {
+                            userCache[kv.Key] = kv.Value == null ? new Dictionary<string, double>(StringComparer.Ordinal) : new Dictionary<string, double>(kv.Value, StringComparer.Ordinal);
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                logger.Warn(ex, "讀取 ratings.users.json 失敗，以空白資料開始");
+            }
+            return userCache;
+        }
+
+        // 呼叫端要自己持有 thisLock。有這位使用者自己的評分就用它，沒有就用舊的共用評分；都沒有是 null
+        double? Lookup(string key, string user)
+        {
+            double v;
+            Dictionary<string, double> mine;
+            if (string.IsNullOrEmpty(user) == false && LoadUsers().TryGetValue(user, out mine) && mine.TryGetValue(key, out v))
+            {
+                return v;
+            }
+            if (Load().TryGetValue(key, out v))
+            {
+                return v;
+            }
+            return null;
         }
 
         Dictionary<string, double> Load()
@@ -117,13 +177,13 @@ namespace WhatSearch.Services
             return shareMatch && parts.Length - 1 == Math.Max(1, rc.Depth);
         }
 
-        public void Apply(FileInfoView view, string folderFullPath)
+        public void Apply(FileInfoView view, string folderFullPath, string user)
         {
             if (IsRateable(folderFullPath) == false)
             {
                 return;
             }
-            RatingInfo info = Resolve(Path.GetFileName(folderFullPath.TrimEnd('\\', '/')));
+            RatingInfo info = Resolve(Path.GetFileName(folderFullPath.TrimEnd('\\', '/')), user);
             view.Rateable = true;
             view.TitlePlain = info.Plain;
             view.Rating = info.Rating;
@@ -153,29 +213,25 @@ namespace WhatSearch.Services
             return MainService.DiscNameRegex.IsMatch(name) == false && MainService.AuxFolderRegex.IsMatch(name) == false;
         }
 
-        public RatingInfo ResolveAlbum(string folderName)
+        public RatingInfo ResolveAlbum(string folderName, string user)
         {
             string plain = (folderName ?? string.Empty).Trim();
             string key = AlbumKeyPrefix + SpaceRegex.Replace(plain, " ");
-            double? rating = null;
+            double? rating;
             lock (thisLock)
             {
-                double v;
-                if (Load().TryGetValue(key, out v))
-                {
-                    rating = v;
-                }
+                rating = Lookup(key, user);
             }
             return new RatingInfo { Key = key, Plain = plain, Rating = rating };
         }
 
-        public void ApplyAlbumListRating(FileInfoView view, string folderFullPath)
+        public void ApplyAlbumListRating(FileInfoView view, string folderFullPath, string user)
         {
             if (IsAlbumShare(folderFullPath) == false)
             {
                 return;
             }
-            RatingInfo info = ResolveAlbum(Path.GetFileName(folderFullPath.TrimEnd('\\', '/')));
+            RatingInfo info = ResolveAlbum(Path.GetFileName(folderFullPath.TrimEnd('\\', '/')), user);
             if (info.Rating.HasValue && info.Rating.Value > 0)
             {
                 view.AlbumRating = info.Rating;
@@ -183,6 +239,11 @@ namespace WhatSearch.Services
         }
 
         public RatingInfo Resolve(string folderName)
+        {
+            return Resolve(folderName, null);
+        }
+
+        public RatingInfo Resolve(string folderName, string user)
         {
             folderName = folderName ?? string.Empty;
             double? legacy = null;
@@ -201,8 +262,8 @@ namespace WhatSearch.Services
             double? effective = legacy;
             lock (thisLock)
             {
-                double sys;
-                if (Load().TryGetValue(key, out sys))
+                double? sys = Lookup(key, user);
+                if (sys.HasValue)
                 {
                     effective = sys;
                 }
@@ -210,17 +271,37 @@ namespace WhatSearch.Services
             return new RatingInfo { Key = key, Plain = plain, Rating = effective };
         }
 
-        public void Set(string key, double rating)
+        public void Set(string key, double rating, string user)
         {
-            if (string.IsNullOrEmpty(key))
+            if (string.IsNullOrEmpty(key) || string.IsNullOrEmpty(user))
             {
                 return;
             }
             lock (thisLock)
             {
-                var all = Load();
-                all[key] = rating;
-                Save(all);
+                var all = LoadUsers();
+                Dictionary<string, double> mine;
+                if (all.TryGetValue(user, out mine) == false)
+                {
+                    mine = new Dictionary<string, double>(StringComparer.Ordinal);
+                    all[user] = mine;
+                }
+                mine[key] = rating;
+                SaveUsers(all);
+            }
+        }
+
+        // 呼叫端要自己持有 thisLock
+        void SaveUsers(Dictionary<string, Dictionary<string, double>> all)
+        {
+            try
+            {
+                SafeFile.WriteAllTextAtomic(UsersPath(), JsonHelper.Serialize(all, indented: true));
+            }
+            catch (Exception ex)
+            {
+                logger.Warn(ex, "寫入 ratings.users.json 失敗");
+                throw;
             }
         }
 
@@ -255,8 +336,80 @@ namespace WhatSearch.Services
         {
             lock (thisLock)
             {
-                return Load().Count;
+                return Load().Count + LoadUsers().Values.Sum(d => d.Count);
             }
+        }
+
+        public RatingStats GetStats()
+        {
+            lock (thisLock)
+            {
+                return new RatingStats
+                {
+                    Legacy = Load().Count,
+                    Users = LoadUsers().Select(kv => new RatingUserCount { Name = kv.Key, Count = kv.Value.Count }).OrderBy(t => t.Name, StringComparer.CurrentCultureIgnoreCase).ToList()
+                };
+            }
+        }
+
+        public int TransferLegacy(string toUser, bool overwrite, out int skipped, out string backupName)
+        {
+            skipped = 0;
+            backupName = null;
+            if (string.IsNullOrEmpty(toUser))
+            {
+                return 0;
+            }
+            lock (thisLock)
+            {
+                var legacy = Load();
+                if (legacy.Count == 0)
+                {
+                    return 0;
+                }
+                backupName = BackupFile(DataPath(), "ratings.backup-", "ratings.backup-*.json");
+                var users = LoadUsers();
+                Dictionary<string, double> mine;
+                if (users.TryGetValue(toUser, out mine) == false)
+                {
+                    mine = new Dictionary<string, double>(StringComparer.Ordinal);
+                    users[toUser] = mine;
+                }
+                int moved = 0;
+                foreach (var kv in legacy)
+                {
+                    if (overwrite == false && mine.ContainsKey(kv.Key))
+                    {
+                        skipped++;
+                        continue;
+                    }
+                    mine[kv.Key] = kv.Value;
+                    moved++;
+                }
+                // 先存新的再清舊的：中間當掉最多是兩邊都有，不會掉資料
+                SaveUsers(users);
+                legacy.Clear();
+                Save(legacy);
+                logger.Info("評分：管理者把舊的共用評分轉給 {0}：轉入 {1} 筆，略過 {2} 筆（已有自己的評分）；備份 {3}", toUser, moved, skipped, backupName ?? "無");
+                return moved;
+            }
+        }
+
+        /// <summary>複製一份備份到同資料夾（檔名前綴 + 時間），只留最近 10 份；原檔不存在回傳 null。呼叫端要自己持有 thisLock</summary>
+        static string BackupFile(string path, string prefix, string searchPattern)
+        {
+            if (File.Exists(path) == false)
+            {
+                return null;
+            }
+            string dir = Path.GetDirectoryName(path);
+            string name = prefix + DateTime.Now.ToString("yyyyMMdd-HHmmss") + ".json";
+            File.Copy(path, Path.Combine(dir, name), true);
+            foreach (string f in Directory.GetFiles(dir, searchPattern).OrderByDescending(t => t, StringComparer.Ordinal).Skip(10))
+            {
+                try { File.Delete(f); } catch (Exception) { }
+            }
+            return name;
         }
 
         // ---------- 資料夾改名：評分記錄跟著走 ----------
@@ -332,22 +485,40 @@ namespace WhatSearch.Services
             }
             lock (thisLock)
             {
-                var all = Load();
-                double v;
-                if (all.TryGetValue(oldKey, out v) == false)
+                // 舊的共用評分與每位使用者的評分都要跟著走
+                if (MoveKeyIn(Load(), "共用", oldKey, newKey))
                 {
-                    return;
+                    Save(Load());
                 }
-                if (all.ContainsKey(newKey))
+                bool usersChanged = false;
+                var users = LoadUsers();
+                foreach (var kv in users)
                 {
-                    logger.Info("評分：「{0}」改名為「{1}」，但新名稱已有評分，兩筆都保留（舊的可到「評分管理」刪除）", oldKey, newKey);
-                    return;
+                    usersChanged |= MoveKeyIn(kv.Value, kv.Key, oldKey, newKey);
                 }
-                all.Remove(oldKey);
-                all[newKey] = v;
-                Save(all);
-                logger.Info("評分：資料夾改名，評分 {0} 從「{1}」跟到「{2}」", v, oldKey, newKey);
+                if (usersChanged)
+                {
+                    SaveUsers(users);
+                }
             }
+        }
+
+        static bool MoveKeyIn(Dictionary<string, double> all, string who, string oldKey, string newKey)
+        {
+            double v;
+            if (all.TryGetValue(oldKey, out v) == false)
+            {
+                return false;
+            }
+            if (all.ContainsKey(newKey))
+            {
+                logger.Info("評分：「{0}」改名為「{1}」，但 {2} 的新名稱已有評分，兩筆都保留（舊的可到「評分管理」刪除）", oldKey, newKey, who);
+                return false;
+            }
+            all.Remove(oldKey);
+            all[newKey] = v;
+            logger.Info("評分：資料夾改名，{0} 的評分 {1} 從「{2}」跟到「{3}」", who, v, oldKey, newKey);
+            return true;
         }
 
         // ---------- 管理：找出對不到資料夾的評分 ----------
@@ -355,12 +526,23 @@ namespace WhatSearch.Services
         public RatingScanResult Scan()
         {
             var result = new RatingScanResult();
-            Dictionary<string, double> snapshot;
+            // key → 誰評了多少（舊的共用評分算一個「共用」）；同一個 key 只列一列
+            var snapshot = new Dictionary<string, List<KeyValuePair<string, double>>>(StringComparer.Ordinal);
             lock (thisLock)
             {
-                snapshot = new Dictionary<string, double>(Load(), StringComparer.Ordinal);
+                foreach (var kv in Load())
+                {
+                    AddOwner(snapshot, kv.Key, "共用（舊）", kv.Value);
+                }
+                foreach (var u in LoadUsers())
+                {
+                    foreach (var kv in u.Value)
+                    {
+                        AddOwner(snapshot, kv.Key, u.Key, kv.Value);
+                    }
+                }
+                result.Total = snapshot.Values.Sum(t => t.Count);
             }
-            result.Total = snapshot.Count;
 
             HashSet<string> animeKeys = null, albumKeys = null;
             var rc = config.Rating;
@@ -387,10 +569,22 @@ namespace WhatSearch.Services
                     Key = kv.Key,
                     Kind = isAlbum ? "album" : "anime",
                     Name = isAlbum ? kv.Key.Substring(AlbumKeyPrefix.Length) : kv.Key,
-                    Rating = kv.Value
+                    Rating = kv.Value[0].Value,
+                    Detail = string.Join("、", kv.Value.Select(o => o.Key + " " + (o.Value > 0 ? o.Value.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture) + " 星" : "未評分")))
                 });
             }
             return result;
+        }
+
+        static void AddOwner(Dictionary<string, List<KeyValuePair<string, double>>> map, string key, string who, double value)
+        {
+            List<KeyValuePair<string, double>> list;
+            if (map.TryGetValue(key, out list) == false)
+            {
+                list = new List<KeyValuePair<string, double>>();
+                map[key] = list;
+            }
+            list.Add(new KeyValuePair<string, double>(who, value));
         }
 
         /// <summary>走訪分享根，回傳目前存在的資料夾所對應的 key 集合；任何一個分享根讀不到（沒掛載、權限）就回傳 null（不可驗證，絕不能把全部評分當髒資料）</summary>
@@ -451,25 +645,25 @@ namespace WhatSearch.Services
             lock (thisLock)
             {
                 var all = Load();
-                string path = DataPath();
-                if (File.Exists(path))
+                var users = LoadUsers();
+                string legacyBackup = BackupFile(DataPath(), "ratings.backup-", "ratings.backup-*.json");
+                string usersBackup = BackupFile(UsersPath(), "ratings.users.backup-", "ratings.users.backup-*.json");
+                backupName = string.Join("、", new[] { legacyBackup, usersBackup }.Where(t => t != null));
+                if (backupName.Length == 0)
                 {
-                    string dir = Path.GetDirectoryName(path);
-                    backupName = "ratings.backup-" + DateTime.Now.ToString("yyyyMMdd-HHmmss") + ".json";
-                    File.Copy(path, Path.Combine(dir, backupName), true);
-                    // 備份只留最近 10 份
-                    var old = Directory.GetFiles(dir, "ratings.backup-*.json").OrderByDescending(t => t, StringComparer.Ordinal).Skip(10);
-                    foreach (string f in old)
-                    {
-                        try { File.Delete(f); } catch (Exception) { }
-                    }
+                    backupName = null;
                 }
                 int n = 0;
                 foreach (string k in toDelete)
                 {
                     if (all.Remove(k)) { n++; }
+                    foreach (var u in users.Values)
+                    {
+                        if (u.Remove(k)) { n++; }
+                    }
                 }
                 Save(all);
+                SaveUsers(users);
                 logger.Info("評分：管理者刪除 {0} 筆找不到資料夾的評分（備份 {1}）", n, backupName ?? "無");
                 return n;
             }

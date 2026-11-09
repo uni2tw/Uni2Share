@@ -18,6 +18,26 @@ namespace WhatSearch.Models
         /// <summary>0 代表使用者明確設為「未評分」</summary>
         [JsonPropertyName("rating")]
         public double Rating { get; set; }
+        /// <summary>誰評了多少，例如「admin 4 星、共用（舊） 3 星」</summary>
+        [JsonPropertyName("detail")]
+        public string Detail { get; set; }
+    }
+
+    public class RatingUserCount
+    {
+        [JsonPropertyName("name")]
+        public string Name { get; set; }
+        [JsonPropertyName("count")]
+        public int Count { get; set; }
+    }
+
+    /// <summary>評分的分布：舊的共用評分有幾筆，以及每位使用者各有幾筆</summary>
+    public class RatingStats
+    {
+        [JsonPropertyName("legacy")]
+        public int Legacy { get; set; }
+        [JsonPropertyName("users")]
+        public List<RatingUserCount> Users { get; set; } = new List<RatingUserCount>();
     }
 
     public class RatingScanResult

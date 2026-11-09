@@ -140,15 +140,16 @@ namespace WhatSearch.WebAPIs
                 breadcrumbs.AddRange(mainService.GetBreadcrumbs(model.p));
                 discs = mainService.GetMultiDiscGroups(model.p);
                 string folderPath = fimgr.GetPath(model.p);
+                string me = User.Identity.IsAuthenticated ? User.Identity.Name : null;        // 評分是每人一份
                 foreach (FileInfoView item in items)
                 {
                     if (item.Type == Helper.ConstStrings.Folder)
                     {
                         string childPath = fimgr.GetPath(item.Id);
-                        ratingService.Apply(item, childPath);
+                        ratingService.Apply(item, childPath, me);
                         if (item.Rateable != true)
                         {
-                            ratingService.ApplyAlbumListRating(item, childPath);        // 專輯：已評分的才在列表上顯示星星
+                            ratingService.ApplyAlbumListRating(item, childPath, me);        // 專輯：已評分的才在列表上顯示星星
                         }
                         else if (unplayableService.Get(ratingService.Resolve(Path.GetFileName(childPath.TrimEnd('\\', '/'))).Key) != null)
                         {
@@ -159,7 +160,7 @@ namespace WhatSearch.WebAPIs
                 if (ratingService.IsRateable(folderPath))
                 {
                     FileInfoView self = new FileInfoView();
-                    ratingService.Apply(self, folderPath);
+                    ratingService.Apply(self, folderPath, me);
                     RatingInfo animeInfo = ratingService.Resolve(new DirectoryInfo(folderPath).Name);
                     UnplayableInfo mark = unplayableService.Get(animeInfo.Key);
                     currentRating = new { id = model.p, name = self.TitlePlain, rating = self.Rating, kind = "anime", unplayable = mark != null, unplayable_by = mark == null ? null : mark.By, unplayable_time = mark == null ? (long?)null : mark.Time };
@@ -167,7 +168,7 @@ namespace WhatSearch.WebAPIs
                 else if (ratingService.IsAlbumShare(folderPath) && (discs != null || items.Count(t => t.Type == Helper.ConstStrings.Music) >= 2))
                 {
                     // 專輯頁（2 首以上音樂，或多片裝的母資料夾）：最上方顯示「我的評分」
-                    RatingInfo album = ratingService.ResolveAlbum(new DirectoryInfo(folderPath).Name);
+                    RatingInfo album = ratingService.ResolveAlbum(new DirectoryInfo(folderPath).Name, me);
                     currentRating = new { id = model.p, name = album.Plain, rating = album.Rating, kind = "album", unplayable = false, unplayable_by = (string)null, unplayable_time = (long?)null };
                 }
             }
@@ -619,13 +620,13 @@ namespace WhatSearch.WebAPIs
             }
             else if (IsAlbumFolder(model.id, folderPath))
             {
-                info = ratingService.ResolveAlbum(new DirectoryInfo(folderPath).Name);
+                info = ratingService.ResolveAlbum(new DirectoryInfo(folderPath).Name, User.Identity.Name);
             }
             else
             {
                 return BadRequest("這個資料夾不支援評分");
             }
-            ratingService.Set(info.Key, model.rating);
+            ratingService.Set(info.Key, model.rating, User.Identity.Name);
             return new { ok = true, rating = model.rating };
         }
 
