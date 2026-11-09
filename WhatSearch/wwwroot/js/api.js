@@ -45,6 +45,16 @@ api.setFavorite = function(kind, id, fav) {
         fav: fav
     });
 }
+// 置頂的資料夾（每人各自，有上限）
+api.pins = function() {
+    return axios.get('/api/pins');
+}
+api.setPin = function(id, pin) {
+    return axios.post('/api/pin', {
+        id: id,
+        pin: pin
+    });
+}
 // 動畫評分（0.5 為一級，0 = 未評分）；id 是資料夾 id
 api.setRating = function(id, rating) {
     return axios.post('/api/rating', {

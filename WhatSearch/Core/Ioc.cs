@@ -28,6 +28,7 @@ namespace WhatSearch.Core
             builder.RegisterType<MemberProvider>().As<IMemberProvider>().SingleInstance();
             builder.RegisterType<UserService>().As<IUserService>().SingleInstance();
             builder.RegisterType<FavoriteService>().As<IFavoriteService>().SingleInstance();
+            builder.RegisterType<PinService>().As<IPinService>().SingleInstance();
             builder.RegisterType<LoudnessService>().As<ILoudnessService>().SingleInstance();
             builder.RegisterType<TranscodeService>().As<ITranscodeService>().SingleInstance();
             builder.RegisterType<PlaybackMonitorService>().As<IPlaybackMonitorService>().SingleInstance();

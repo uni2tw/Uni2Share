@@ -330,6 +330,10 @@
     .fav-btn.fav-on {
         color: #e0245e;
     }
+    /* 置頂（圖釘）按鈕：沿用愛心按鈕的尺寸，已置頂是藍色 */
+    .fav-btn.pin-btn.pin-on {
+        color: #0d6efd;
+    }
     /* 星等評分：每顆星左半 / 右半各是一個點擊區（半顆星） */
     .rating-stars {
         display: inline-flex;
@@ -693,6 +697,12 @@
                             <i :class="favAlbumMap[currentFolderId] ? 'fa-solid fa-heart' : 'fa-regular fa-heart'"></i>
                             {{ favAlbumMap[currentFolderId] ? '已收藏' : '收藏' }}
                         </button>
+                        <button v-if="isLoggedIn && currentFolderId" type="button" class="btn btn-sm"
+                            :class="pinMap[currentFolderId] ? 'btn-primary' : 'btn-outline-primary'"
+                            :title="pinMap[currentFolderId] ? '取消置頂這張專輯' : '在上一層置頂這張專輯'"
+                            v-on:click="vm_togglePin(currentFolderId)">
+                            <i class="fa-solid fa-thumbtack"></i> {{ pinMap[currentFolderId] ? '已置頂' : '置頂' }}
+                        </button>
                         <button type="button" class="btn btn-sm btn-outline-secondary" title="切換列表檢視" v-on:click="showListView = true">
                             <i class="fa fa-list"></i> 列表
                         </button>
@@ -801,6 +811,10 @@
                         <div v-else style="width:40%; text-align:right">{{ item.duration ? formatDuration(item.duration) + ' · ' : '' }}{{ item.size }}</div>
                     </div>
                 </div>
+            </div>
+            <div v-if="vm_canPin(item)" class="fav-btn pin-btn" :class="{'pin-on': pinMap[item.id]}" :title="pinMap[item.id] ? '取消置頂' : '置頂'"
+                v-on:click.stop="vm_togglePin(item.id)">
+                <i class="fa-solid fa-thumbtack" :style="pinMap[item.id] ? '' : 'transform:rotate(45deg); opacity:.55;'"></i>
             </div>
             <div v-if="vm_canFav(item)" class="fav-btn" :class="{'fav-on': vm_isFav(item)}" title="加入最愛"
                 v-on:click.stop="vm_toggleFav(item.type === 'folder' ? 'album' : 'track', item.id)">
@@ -1230,6 +1244,8 @@
                     tierPreview: null,
                     coverEdit: null,
                     favAlbumMap: {},
+                    pinMap: {},
+                    pinMax: 50,
                     favTrackMap: {},
                     favView: false,
                     favTab: 'album',
@@ -1332,7 +1348,7 @@
                             base = base.filter(t => !t.rateable || val(t) === null);
                         }
                     }
-                    return this.vm_sortItems(base);
+                    return this.vm_pinFirst(this.vm_sortItems(base));
                 },
                 // 排序選單是否顯示：只在「單一資料夾」的列表（不含搜尋/我的最愛、也不含專輯與追番的專屬版面），
                 // 項目至少 6 個才有排序的必要（已經選過排序的資料夾一律顯示，才看得到為什麼是這個順序）
@@ -1767,6 +1783,7 @@
                     this.alertUnread = this.isAdmin ? (res.data.alerts || 0) : 0;
                     if (this.isLoggedIn) {
                         this.vm_loadFavorites();
+                        this.vm_loadPins();
                     }
                 }).catch(err => {
                     console.log('error response from api.info with ', err.response);
@@ -2798,6 +2815,61 @@
                             this.resumeHint = true;
                         });
                     }
+                },
+                // ----- 置頂資料夾（每人各自；置頂的排在同一層的最前面，各組內仍依目前的排序） -----
+                vm_loadPins: function () {
+                    api.pins().then(res => {
+                        let map = {};
+                        (res.data.ids || []).forEach(id => { map[id] = true; });
+                        this.pinMap = map;
+                        if (res.data.max) { this.pinMax = res.data.max; }
+                    }).catch(err => {
+                        console.log('error response from api.pins with ', err.response);
+                    });
+                },
+                vm_pinFirst: function (list) {
+                    if (list.length < 2 || list.some(t => t.path) || Object.keys(this.pinMap).length === 0) {
+                        return list;
+                    }
+                    let isPinned = t => t.type === 'folder' && !!this.pinMap[t.id];
+                    let pinned = list.filter(isPinned);
+                    return pinned.length === 0 ? list : pinned.concat(list.filter(t => !isPinned(t)));
+                },
+                vm_canPin: function (item) {
+                    return this.isLoggedIn === true && item.type === 'folder' && !this.favView && !item.path;
+                },
+                // 樂觀更新：先改畫面，伺服器失敗（含超過上限）再還原
+                vm_togglePin: function (id) {
+                    if (!id) {
+                        return;
+                    }
+                    let want = !this.pinMap[id];
+                    if (want && Object.keys(this.pinMap).length >= this.pinMax) {
+                        alert('最多只能置頂 ' + this.pinMax + ' 個資料夾，請先取消一些');
+                        return;
+                    }
+                    let set = (on) => {
+                        let m = Object.assign({}, this.pinMap);
+                        if (on) { m[id] = true; } else { delete m[id]; }
+                        this.pinMap = m;
+                    };
+                    set(want);
+                    api.setPin(id, want).then(res => {
+                        if (res.data && res.data.ok === false) {
+                            set(!want);
+                            alert(res.data.message || '置頂失敗');
+                        }
+                    }).catch(err => {
+                        set(!want);
+                        let st = err && err.response ? err.response.status : 0;
+                        if (st === 401) {
+                            this.redirectToLogin('');
+                        } else if (st === 404) {
+                            alert('找不到這個資料夾，可能已改名或刪除');
+                        } else {
+                            alert('置頂失敗，請稍後再試');
+                        }
+                    });
                 },
                 vm_canFav: function (item) {
                     return this.isLoggedIn === true && (item.type === 'music' || (this.favView && item.type === 'folder'));
