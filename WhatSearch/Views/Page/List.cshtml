@@ -1050,12 +1050,12 @@
             <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; margin-bottom:8px;">
                 <div style="font-weight:bold;">評分圖（{{ tierPreview.count }} 部）</div>
                 <div style="display:flex; gap:6px;">
-                    <a class="btn btn-sm btn-success" :href="tierPreview.url" :download="tierPreview.fileName"><i class="fa fa-download"></i> 下載圖片</a>
+                    <a class="btn btn-sm btn-success" :href="tierPreview.url" :download="tierPreview.fileName" v-on:click="vm_downloadTier($event)"><i class="fa fa-download"></i> 下載圖片</a>
                     <button type="button" class="btn btn-sm btn-outline-secondary" v-on:click="vm_closeTierPreview()"><i class="fa fa-times"></i></button>
                 </div>
             </div>
             <img :src="tierPreview.url" style="width:100%; display:block; border-radius:6px;" />
-            <div style="font-size:12px; color:#888; margin-top:6px;">手機：長按圖片可以儲存或分享。<span v-if="tierPreview.missing">有 {{ tierPreview.missing }} 部找不到封面，用名稱色塊代替。</span></div>
+            <div style="font-size:12px; color:#888; margin-top:6px;">手機：按「下載圖片」會開分享面板（可儲存影像）；長按圖片也可以儲存或分享。<span v-if="tierPreview.missing">有 {{ tierPreview.missing }} 部找不到封面，用名稱色塊代替。</span></div>
         </div>
     </div>
 
@@ -2281,6 +2281,7 @@
                         this.vm_closeTierPreview();
                         this.tierPreview = {
                             url: URL.createObjectURL(blob),
+                            blob: blob,
                             fileName: season.replace(/[\\/:*?"<>|]/g, '_') + '-評分表.png',
                             count: rows.length,
                             missing: covers.filter(c => !c).length
@@ -2291,6 +2292,36 @@
                         this.tierBusy = false;
                         this.tierProgress = '';
                     }
+                },
+                // 手機上「下載圖片」：blob 連結常被瀏覽器改成「檢視圖片」而把整個分頁導走，正在播放的音樂就停了。
+                // 能分享檔案的手機改叫出系統分享面板（有「儲存影像」），不離開頁面；其他環境照舊走一般下載連結
+                vm_downloadTier: function (ev) {
+                    let t = this.tierPreview;
+                    let isPhone = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent) || (/Macintosh/i.test(navigator.userAgent) && navigator.maxTouchPoints > 1);
+                    if (!t || !t.blob || !isPhone || typeof navigator.share !== 'function' || typeof navigator.canShare !== 'function') {
+                        return;
+                    }
+                    let file;
+                    try {
+                        file = new File([t.blob], t.fileName, { type: 'image/png' });
+                        if (!navigator.canShare({ files: [file] })) {
+                            return;
+                        }
+                    } catch (e) {
+                        return;
+                    }
+                    ev.preventDefault();
+                    navigator.share({ files: [file], title: t.fileName }).catch(e => {
+                        // 自己關掉分享面板（AbortError）不算錯；真的分享失敗就退回一般下載
+                        if (e && e.name !== 'AbortError') {
+                            let a = document.createElement('a');
+                            a.href = t.url;
+                            a.download = t.fileName;
+                            document.body.appendChild(a);
+                            a.click();
+                            document.body.removeChild(a);
+                        }
+                    });
                 },
                 vm_closeTierPreview: function () {
                     if (this.tierPreview) {
