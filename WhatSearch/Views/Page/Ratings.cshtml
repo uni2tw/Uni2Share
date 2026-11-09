@@ -16,7 +16,8 @@
                         selected: {},
                         transferTo: '',
                         transferOverwrite: false,
-                        transferring: false
+                        transferring: false,
+                        purging: false
                     }
                 },
                 computed: {
@@ -116,6 +117,33 @@
                     vm_kind: function (kind) {
                         return kind === 'album' ? '專輯' : '動畫';
                     },
+                    vm_purge: function () {
+                        var self = this;
+                        var gone = self.data.users.filter(function (u) { return !u.exists; });
+                        if (!gone.length) {
+                            return;
+                        }
+                        var n = gone.reduce(function (s, u) { return s + u.count; }, 0);
+                        var text = '要清除已刪除會員的評分嗎？\n\n'
+                            + gone.map(function (u) { return '・' + u.name + '：' + u.count + ' 筆'; }).join('\n') + '\n\n'
+                            + '共 ' + n + ' 筆，清除後無法在頁面上復原（清之前會先備份 ratings.users.json）。';
+                        if (!window.confirm(text)) {
+                            return;
+                        }
+                        self.purging = true;
+                        axios.post('/admin/ratings/purge-deleted', {}).then(function (res) {
+                            var d = res.data || {};
+                            self.vm_showAlert(d.message || '清除失敗');
+                            if (d.success === 1) {
+                                self.scan = null;
+                                self.vm_load();
+                            }
+                        }).catch(function () {
+                            self.vm_showAlert('清除失敗，請稍後再試');
+                        }).finally(function () {
+                            self.purging = false;
+                        });
+                    },
                     vm_transfer: function () {
                         var self = this, to = self.transferTo;
                         if (!to || !self.data || !self.data.legacy) {
@@ -171,6 +199,18 @@
         <div v-if="!loaded" style="color:#888; padding:20px 0;">載入中…</div>
 
         <div v-else>
+            <div v-if="data.users.some(function (u) { return !u.exists; })" class="card" style="margin-bottom:14px;">
+                <div class="card-body" style="font-size:13px; line-height:1.8;">
+                    <div style="font-weight:bold; margin-bottom:4px;"><i class="fa fa-user-slash"></i> 已刪除的會員還留著評分</div>
+                    <div style="color:#666; margin-bottom:8px;">
+                        {{ data.users.filter(function (u) { return !u.exists; }).map(function (u) { return u.name + ' ' + u.count + ' 筆'; }).join('、') }}。
+                        這些會員已經不存在，評分不會再被任何人看到，可以直接清掉（清之前會先備份）。
+                    </div>
+                    <button type="button" class="btn btn-sm btn-warning" :disabled="purging" v-on:click="vm_purge()">
+                        <i class="fa" :class="purging ? 'fa-spinner fa-spin' : 'fa-trash'"></i> 清除這些評分
+                    </button>
+                </div>
+            </div>
             <div v-if="data.legacy > 0" class="card" style="margin-bottom:14px;">
                 <div class="card-body" style="font-size:13px; line-height:1.8;">
                     <div style="font-weight:bold; margin-bottom:4px;"><i class="fa fa-right-left"></i> 舊的共用評分還有 {{ data.legacy }} 筆</div>

@@ -400,6 +400,32 @@ namespace WhatSearch.Controllers
             return new { Success = 1, Deleted = n, Backup = backup, Message = "已刪除 " + n + " 筆" + (backup != null ? "，原檔備份在 data\\" + backup : "") };
         }
 
+        /// <summary>清掉已經刪除的會員留下的評分（以目前的會員清單為準，由伺服器判斷，不信任前端傳來的名單）；清之前會備份</summary>
+        [HttpPost]
+        [Route("admin/ratings/purge-deleted")]
+        [RoleAuthorize("Admin")]
+        public dynamic RatingsPurgeDeleted()
+        {
+            IRatingService rating = Ioc.Get<IRatingService>();
+            IUserService users = Ioc.Get<IUserService>();
+            var gone = rating.GetStats().Users.Where(u => users.GetMember(u.Name) == null).Select(u => u.Name).ToList();
+            if (gone.Count == 0)
+            {
+                return new { Success = 0, Message = "沒有已刪除會員留下的評分" };
+            }
+            int removedUsers;
+            string backup;
+            int removed = rating.RemoveUsers(gone, out removedUsers, out backup);
+            return new
+            {
+                Success = 1,
+                Removed = removed,
+                Users = removedUsers,
+                Backup = backup,
+                Message = "已清除 " + removedUsers + " 位已刪除會員的評分，共 " + removed + " 筆" + (backup != null ? "；原檔備份在 data\\" + backup : string.Empty)
+            };
+        }
+
         /// <summary>把舊的共用評分（1.38.0 以前全站一份的 ratings.json）整份轉給某位會員，轉完清空；轉之前會備份</summary>
         [HttpPost]
         [Route("admin/ratings/transfer")]

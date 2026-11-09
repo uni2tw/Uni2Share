@@ -37,6 +37,8 @@ namespace WhatSearch.Services
         RatingStats GetStats();
         /// <summary>把舊的共用評分（ratings.json）轉給指定使用者：overwrite 為 false 時，該使用者已經評過的項目保留他自己的。轉完舊的共用評分會清空（轉之前先備份）。回傳轉入筆數，skipped 是因為已有自己的評分而略過的筆數</summary>
         int TransferLegacy(string toUser, bool overwrite, out int skipped, out string backupName);
+        /// <summary>刪除指定使用者的全部評分（給已經刪除的會員用；刪之前先備份 ratings.users.json）。回傳實際刪掉的評分筆數，removedUsers 是移除的使用者數</summary>
+        int RemoveUsers(ICollection<string> names, out int removedUsers, out string backupName);
         /// <summary>掃描分享根，找出評分記錄裡對不到資料夾的項目（要走訪資料夾，網路磁碟上會慢，只在管理者要求時才做）</summary>
         RatingScanResult Scan();
         /// <summary>刪除指定的髒資料（會重新掃描，只刪仍然對不到資料夾的；刪之前先備份 ratings.json）。回傳實際刪除筆數</summary>
@@ -392,6 +394,35 @@ namespace WhatSearch.Services
                 Save(legacy);
                 logger.Info("評分：管理者把舊的共用評分轉給 {0}：轉入 {1} 筆，略過 {2} 筆（已有自己的評分）；備份 {3}", toUser, moved, skipped, backupName ?? "無");
                 return moved;
+            }
+        }
+
+        public int RemoveUsers(ICollection<string> names, out int removedUsers, out string backupName)
+        {
+            removedUsers = 0;
+            backupName = null;
+            if (names == null || names.Count == 0)
+            {
+                return 0;
+            }
+            lock (thisLock)
+            {
+                var users = LoadUsers();
+                var hit = users.Keys.Where(k => names.Contains(k, StringComparer.OrdinalIgnoreCase)).ToList();
+                if (hit.Count == 0)
+                {
+                    return 0;
+                }
+                int removed = hit.Sum(k => users[k].Count);
+                backupName = BackupFile(UsersPath(), "ratings.users.backup-", "ratings.users.backup-*.json");
+                foreach (string k in hit)
+                {
+                    users.Remove(k);
+                }
+                SaveUsers(users);
+                removedUsers = hit.Count;
+                logger.Info("評分：管理者清除已刪除會員的評分：{0}，共 {1} 筆；備份 {2}", string.Join("、", hit), removed, backupName ?? "無");
+                return removed;
             }
         }
 
