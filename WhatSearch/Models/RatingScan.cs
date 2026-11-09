@@ -55,9 +55,9 @@ namespace WhatSearch.Models
         /// <summary>平均給分；沒有評分時為 0</summary>
         [JsonPropertyName("avg")]
         public double Avg { get; set; }
-        /// <summary>星等分布：10 格，依序是 0.5、1、1.5 … 5 星各幾筆</summary>
+        /// <summary>星等分布：6 格，依序是 2.5、3、3.5、4、4.5、5 星各幾筆（評分只收 2.5～5；更低的舊資料算進 2.5 那格）</summary>
         [JsonPropertyName("dist")]
-        public int[] Dist { get; set; } = new int[10];
+        public int[] Dist { get; set; } = new int[6];
     }
 
     /// <summary>被兩位以上使用者評過的作品</summary>

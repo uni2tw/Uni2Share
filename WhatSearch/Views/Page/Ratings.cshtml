@@ -127,7 +127,7 @@
                         return Math.max.apply(null, u.dist.concat([1]));
                     },
                     vm_distTip: function (u) {
-                        return u.dist.map(function (n, i) { return ((i + 1) / 2) + ' 星 ' + n + ' 筆'; }).join('\n');
+                        return u.dist.map(function (n, i) { return ((i + 5) / 2) + ' 星 ' + n + ' 筆'; }).join('\n');
                     },
                     vm_kindText: function (kind) {
                         return kind === 'album' ? '專輯' : '動畫';
@@ -227,7 +227,7 @@
                                     <th>動畫</th>
                                     <th>專輯</th>
                                     <th>平均</th>
-                                    <th>星等分布（0.5 → 5）</th>
+                                    <th>星等分布（2.5 → 5）</th>
                                 </tr>
                             </thead>
                             <tbody>
