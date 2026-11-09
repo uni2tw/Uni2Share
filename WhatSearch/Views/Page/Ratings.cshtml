@@ -13,7 +13,10 @@
                         scanning: false,
                         deleting: false,
                         scan: null,
-                        selected: {}
+                        selected: {},
+                        transferTo: '',
+                        transferOverwrite: false,
+                        transferring: false
                     }
                 },
                 computed: {
@@ -93,7 +96,7 @@
                         if (keys.length === 0) {
                             return;
                         }
-                        if (!window.confirm('確定要刪除選取的 ' + keys.length + ' 筆評分嗎？\n刪除前會先備份 ratings.json。')) {
+                        if (!window.confirm('確定要刪除選取的 ' + keys.length + ' 筆評分嗎？（所有人的這幾個項目的評分都會刪掉）\n刪除前會先備份評分檔。')) {
                             return;
                         }
                         self.deleting = true;
@@ -112,6 +115,32 @@
                     },
                     vm_kind: function (kind) {
                         return kind === 'album' ? '專輯' : '動畫';
+                    },
+                    vm_transfer: function () {
+                        var self = this, to = self.transferTo;
+                        if (!to || !self.data || !self.data.legacy) {
+                            return;
+                        }
+                        var text = '要把舊的共用評分 ' + self.data.legacy + ' 筆轉給「' + to + '」嗎？\n\n'
+                            + '・轉完這些評分變成「' + to + '」自己的，舊的共用評分清空（其他人不會再看到）。\n'
+                            + '・' + (self.transferOverwrite ? '對方已經評過的項目會被舊評分覆蓋。' : '對方已經評過的項目保留他自己的。') + '\n'
+                            + '・轉之前會先備份 ratings.json。';
+                        if (!window.confirm(text)) {
+                            return;
+                        }
+                        self.transferring = true;
+                        axios.post('/admin/ratings/transfer', { to: to, overwrite: self.transferOverwrite }).then(function (res) {
+                            var d = res.data || {};
+                            self.vm_showAlert(d.message || '轉移失敗');
+                            if (d.success === 1) {
+                                self.scan = null;
+                                self.vm_load();
+                            }
+                        }).catch(function () {
+                            self.vm_showAlert('轉移失敗，請稍後再試');
+                        }).finally(function () {
+                            self.transferring = false;
+                        });
                     }
                 }
             };
@@ -133,21 +162,40 @@
             </span>
         </h1>
         <div style="font-size:13px; color:#666; margin:0 0 12px 0; line-height:1.7;">
-            評分記在 <code>data\ratings.json</code>，以資料夾「名稱」對應。資料夾改名時系統會自動讓評分跟著新名稱走（需要伺服器正在執行、檔案監看有收到事件）；
+            評分每位會員一份，記在 <code>data\ratings.users.json</code>，以資料夾「名稱」對應。資料夾改名時系統會自動讓所有人的評分跟著新名稱走（需要伺服器正在執行、檔案監看有收到事件）；
             名稱對不上的（伺服器沒開時改的名、已刪除、搬出分享根）會變成找不到資料夾的評分。「檢查」會走訪分享根的資料夾，網路磁碟上可能要一段時間；
-            刪除前會先備份 <code>ratings.json</code>（最近 10 份）。
+            刪除前會先備份評分檔（各最近 10 份）。
             <span v-if="failed" style="color:#dc3545;"><i class="fa fa-triangle-exclamation"></i> 載入失敗</span>
         </div>
 
         <div v-if="!loaded" style="color:#888; padding:20px 0;">載入中…</div>
 
         <div v-else>
+            <div v-if="data.legacy > 0" class="card" style="margin-bottom:14px;">
+                <div class="card-body" style="font-size:13px; line-height:1.8;">
+                    <div style="font-weight:bold; margin-bottom:4px;"><i class="fa fa-right-left"></i> 舊的共用評分還有 {{ data.legacy }} 筆</div>
+                    <div style="color:#666; margin-bottom:8px;">
+                        這是改成「每人一份」之前全站共用的評分（<code>data\ratings.json</code>）。會員自己沒評過的項目目前還看得到它。
+                        轉給某位會員後，這些評分就變成他自己的，舊的共用評分清空，其他人不會再看到。
+                    </div>
+                    <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+                        <select class="form-select form-select-sm" style="width:auto; min-width:160px;" v-model="transferTo" :disabled="transferring">
+                            <option value="">選擇要轉給誰…</option>
+                            <option v-for="u in data.users" :key="u.name" :value="u.name" :disabled="!u.exists">{{ u.display && u.display !== u.name ? u.display + '（' + u.name + '）' : u.name }}　已有 {{ u.count }} 筆</option>
+                        </select>
+                        <label style="cursor:pointer; user-select:none; margin:0;"><input type="checkbox" v-model="transferOverwrite" :disabled="transferring"> 對方已有的也覆蓋</label>
+                        <button type="button" class="btn btn-sm btn-warning" :disabled="!transferTo || transferring" v-on:click="vm_transfer()">
+                            <i class="fa" :class="transferring ? 'fa-spinner fa-spin' : 'fa-right-left'"></i> 轉給他
+                        </button>
+                    </div>
+                </div>
+            </div>
             <div v-if="!enabled" style="color:#b26a00; padding:8px 0;">
                 <i class="fa fa-triangle-exclamation"></i> 目前沒有啟用評分（config 的 rating.shares／rating.albums.shares），沒有可檢查的項目。
             </div>
             <div v-else>
                 <div style="font-size:13px; color:#666; margin-bottom:10px; line-height:1.8;">
-                    共 <b>{{ data.total }}</b> 筆評分
+                    共 <b>{{ data.total }}</b> 筆評分<span v-if="data.users.some(function (u) { return u.count > 0; })">（{{ data.users.filter(function (u) { return u.count > 0; }).map(function (u) { return u.name + ' ' + u.count; }).join('、') }}<span v-if="data.legacy > 0">、舊共用 {{ data.legacy }}</span>）</span>
                     <span v-if="data.animeShares.length">；動畫分享根：{{ data.animeShares.join('、') }}</span>
                     <span v-if="data.albumShares.length">；專輯分享根：{{ data.albumShares.join('、') }}</span>
                 </div>
@@ -179,7 +227,7 @@
                                     <th style="width:32px;"><input type="checkbox" :checked="allSelected" v-on:change="vm_toggleAll()" title="全選／取消"></th>
                                     <th style="white-space:nowrap;">類型</th>
                                     <th>名稱</th>
-                                    <th style="white-space:nowrap;">評分</th>
+                                    <th style="white-space:nowrap;">誰評了多少</th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -189,7 +237,7 @@
                                         <span class="badge" :class="o.kind === 'album' ? 'bg-info' : 'bg-secondary'">{{ vm_kind(o.kind) }}</span>
                                     </td>
                                     <td style="word-break:break-all;">{{ o.name }}</td>
-                                    <td style="font-size:13px; white-space:nowrap;">{{ o.rating > 0 ? o.rating + ' 星' : '未評分' }}</td>
+                                    <td style="font-size:13px; white-space:nowrap;">{{ o.detail || (o.rating > 0 ? o.rating + ' 星' : '未評分') }}</td>
                                 </tr>
                             </tbody>
                         </table>
