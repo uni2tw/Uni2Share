@@ -643,6 +643,44 @@ namespace WhatSearch.WebAPIs
             return new { albums = data.Albums, tracks = data.Tracks };
         }
 
+        /// <summary>目前會員置頂的資料夾 id（前端用來標示圖釘與排序；不解析檔案，很便宜）</summary>
+        [HttpGet]
+        [Route("api/pins")]
+        public dynamic GetPins()
+        {
+            if (User.Identity.IsAuthenticated == false)
+            {
+                return Unauthorized();
+            }
+            return new { ids = Ioc.Get<IPinService>().Get(User.Identity.Name), max = PinService.MaxPins };
+        }
+
+        /// <summary>置頂／取消置頂資料夾（每人上限 PinService.MaxPins 個）</summary>
+        [HttpPost]
+        [Route("api/pin")]
+        public dynamic SetPin([FromBody] PinInputModel model)
+        {
+            if (User.Identity.IsAuthenticated == false)
+            {
+                return Unauthorized();
+            }
+            if (model == null || string.IsNullOrEmpty(model.id))
+            {
+                return BadRequest("參數錯誤");
+            }
+            // 只接受存在的資料夾；取消置頂不檢查，資料夾被改名或刪除後也要能取消
+            if (model.pin && mainService.GetFolderView(model.id) == null)
+            {
+                return NotFound("找不到這個資料夾");
+            }
+            string error;
+            if (Ioc.Get<IPinService>().Set(User.Identity.Name, model.id, model.pin, out error) == false)
+            {
+                return new { ok = false, message = error };
+            }
+            return new { ok = true };
+        }
+
         /// <summary>加入/移除最愛。kind: album（資料夾 id）或 track（音樂檔 id）</summary>
         [HttpPost]
         [Route("api/favorites")]
@@ -811,6 +849,12 @@ namespace WhatSearch.WebAPIs
         {
             public string id { get; set; }
             public double rating { get; set; }
+        }
+
+        public class PinInputModel
+        {
+            public string id { get; set; }
+            public bool pin { get; set; }
         }
 
         public class FavoriteInputModel
