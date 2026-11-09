@@ -2828,7 +2828,8 @@
                     });
                 },
                 vm_pinFirst: function (list) {
-                    if (list.length < 2 || list.some(t => t.path) || Object.keys(this.pinMap).length === 0) {
+                    // 只有排序是「預設」時才用置頂排序；選了其他排序就完全照那個排序，置頂不介入
+                    if (this.sortMode !== 'default' || list.length < 2 || list.some(t => t.path) || Object.keys(this.pinMap).length === 0) {
                         return list;
                     }
                     let isPinned = t => t.type === 'folder' && !!this.pinMap[t.id];
@@ -2836,7 +2837,8 @@
                     return pinned.length === 0 ? list : pinned.concat(list.filter(t => !isPinned(t)));
                 },
                 vm_canPin: function (item) {
-                    return this.isLoggedIn === true && item.type === 'folder' && !this.favView && !item.path;
+                    // 排序為「預設」才能置頂（其他排序下置頂不生效，按鈕也不顯示）
+                    return this.isLoggedIn === true && item.type === 'folder' && !this.favView && !item.path && this.sortMode === 'default';
                 },
                 // 樂觀更新：先改畫面，伺服器失敗（含超過上限）再還原
                 vm_togglePin: function (id) {
