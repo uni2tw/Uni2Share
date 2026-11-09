@@ -358,6 +358,7 @@ namespace WhatSearch.Controllers
             var rc = config.Rating;
             IRatingService rating = Ioc.Get<IRatingService>();
             RatingStats stats = rating.GetStats();
+            RatingInsights insights = rating.GetInsights();
             Dictionary<string, int> counts = stats.Users.ToDictionary(t => t.Name, t => t.Count, StringComparer.OrdinalIgnoreCase);
             return new
             {
@@ -368,6 +369,22 @@ namespace WhatSearch.Controllers
                     .Select(m => new { name = m.Name, display = m.DisplayName, count = counts.ContainsKey(m.Name) ? counts[m.Name] : 0, exists = true })
                     .Concat(stats.Users.Where(u => Ioc.Get<IUserService>().GetMember(u.Name) == null).Select(u => new { name = u.Name, display = u.Name, count = u.Count, exists = false }))
                     .OrderBy(t => t.name, StringComparer.CurrentCultureIgnoreCase),
+                // 統計：每位使用者（含已刪除會員）的排名資料，以及最多人評過、分歧最大的作品
+                insights = new
+                {
+                    users = insights.Users.Select(u => new
+                    {
+                        name = u.Name,
+                        exists = Ioc.Get<IUserService>().GetMember(u.Name) != null,
+                        count = u.Count,
+                        anime = u.Anime,
+                        album = u.Album,
+                        avg = u.Avg,
+                        dist = u.Dist
+                    }),
+                    mostRated = insights.MostRated,
+                    divergent = insights.Divergent
+                },
                 animeShares = rc != null && rc.Shares != null ? rc.Shares : new List<string>(),
                 albumShares = rc != null && rc.Albums != null && rc.Albums.Shares != null ? rc.Albums.Shares : new List<string>()
             };

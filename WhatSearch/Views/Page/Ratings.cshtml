@@ -117,6 +117,21 @@
                     vm_kind: function (kind) {
                         return kind === 'album' ? '專輯' : '動畫';
                     },
+                    vm_pct: function (n, total) {
+                        return total > 0 ? Math.round(n * 100 / total) : 0;
+                    },
+                    vm_maxCount: function () {
+                        return this.data.insights.users.reduce(function (m, u) { return Math.max(m, u.count); }, 0);
+                    },
+                    vm_distMax: function (u) {
+                        return Math.max.apply(null, u.dist.concat([1]));
+                    },
+                    vm_distTip: function (u) {
+                        return u.dist.map(function (n, i) { return ((i + 1) / 2) + ' 星 ' + n + ' 筆'; }).join('\n');
+                    },
+                    vm_kindText: function (kind) {
+                        return kind === 'album' ? '專輯' : '動畫';
+                    },
                     vm_purge: function () {
                         var self = this;
                         var gone = self.data.users.filter(function (u) { return !u.exists; });
@@ -199,6 +214,64 @@
         <div v-if="!loaded" style="color:#888; padding:20px 0;">載入中…</div>
 
         <div v-else>
+            <div v-if="data.insights.users.length" class="card" style="margin-bottom:14px;">
+                <div class="card-body" style="font-size:13px; line-height:1.7;">
+                    <div style="font-weight:bold; margin-bottom:6px;"><i class="fa fa-ranking-star"></i> 評分貢獻排名</div>
+                    <div style="overflow-x:auto;">
+                        <table class="table table-sm" style="margin:0; min-width:560px;">
+                            <thead>
+                                <tr style="color:#888; font-size:12px;">
+                                    <th style="width:34px;">#</th>
+                                    <th>會員</th>
+                                    <th style="min-width:160px;">筆數</th>
+                                    <th>動畫</th>
+                                    <th>專輯</th>
+                                    <th>平均</th>
+                                    <th>星等分布（0.5 → 5）</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr v-for="(u, i) in data.insights.users" :key="u.name" :style="u.exists ? '' : 'color:#999;'">
+                                    <td>{{ i + 1 }}</td>
+                                    <td>{{ u.name }}<span v-if="!u.exists" style="font-size:11px; margin-left:4px;">（已刪除）</span></td>
+                                    <td>
+                                        <span style="display:inline-block; vertical-align:middle; height:10px; border-radius:2px; background:#0d6efd; min-width:2px;" :style="{ width: (vm_maxCount() ? Math.round(u.count * 100 / vm_maxCount()) : 0) + 'px', opacity: u.exists ? 1 : 0.4 }"></span>
+                                        <b style="margin-left:4px;">{{ u.count }}</b>
+                                        <span style="color:#888; font-size:12px;">（{{ vm_pct(u.count, data.insights.users.reduce(function (s, x) { return s + x.count; }, 0)) }}%）</span>
+                                    </td>
+                                    <td>{{ u.anime }}</td>
+                                    <td>{{ u.album }}</td>
+                                    <td>{{ u.count ? u.avg.toFixed(2) : '-' }}</td>
+                                    <td>
+                                        <span style="display:inline-flex; align-items:flex-end; gap:2px; height:24px;" :title="vm_distTip(u)">
+                                            <span v-for="(n, k) in u.dist" :key="k" style="display:inline-block; width:7px; border-radius:1px; background:#f0ad4e;" :style="{ height: Math.max(n ? 2 : 0, Math.round(n * 24 / vm_distMax(u))) + 'px', opacity: u.exists ? 1 : 0.4 }"></span>
+                                        </span>
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                    <div style="color:#888; font-size:12px; margin-top:4px;">只算每位會員自己的評分（大於 0 的）；舊的共用評分不算。</div>
+                    <div v-if="data.insights.mostRated.length" style="display:flex; gap:24px; flex-wrap:wrap; margin-top:12px;">
+                        <div style="flex:1 1 320px; min-width:0;">
+                            <div style="font-weight:bold; margin-bottom:4px;">最多人評過</div>
+                            <div v-for="(r, i) in data.insights.mostRated" :key="'m' + i" style="padding:2px 0; border-top:1px solid #eee;">
+                                <span style="color:#888;">{{ i + 1 }}.</span> {{ r.name }} <span style="font-size:11px; color:#888;">［{{ vm_kindText(r.kind) }}］</span>
+                                <div style="color:#666; font-size:12px; padding-left:18px;">{{ r.count }} 人評過・平均 {{ r.avg.toFixed(2) }}・{{ r.detail }}</div>
+                            </div>
+                        </div>
+                        <div style="flex:1 1 320px; min-width:0;">
+                            <div style="font-weight:bold; margin-bottom:4px;">分歧最大</div>
+                            <div v-if="!data.insights.divergent.length" style="color:#888; font-size:12px;">目前大家評得一樣，沒有分歧。</div>
+                            <div v-for="(r, i) in data.insights.divergent" :key="'d' + i" style="padding:2px 0; border-top:1px solid #eee;">
+                                <span style="color:#888;">{{ i + 1 }}.</span> {{ r.name }} <span style="font-size:11px; color:#888;">［{{ vm_kindText(r.kind) }}］</span>
+                                <div style="color:#666; font-size:12px; padding-left:18px;">相差 {{ r.spread }} 星・{{ r.detail }}</div>
+                            </div>
+                        </div>
+                    </div>
+                    <div v-else style="color:#888; font-size:12px; margin-top:8px;">還沒有被兩位以上會員評過的作品，所以沒有「最多人評過」與「分歧最大」。</div>
+                </div>
+            </div>
             <div v-if="data.users.some(function (u) { return !u.exists; })" class="card" style="margin-bottom:14px;">
                 <div class="card-body" style="font-size:13px; line-height:1.8;">
                     <div style="font-weight:bold; margin-bottom:4px;"><i class="fa fa-user-slash"></i> 已刪除的會員還留著評分</div>
