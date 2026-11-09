@@ -384,8 +384,9 @@ namespace WhatSearch.Services
                         {
                             stat.Anime++;
                         }
-                        int idx = (int)Math.Round(kv.Value * 2) - 1;
-                        stat.Dist[Math.Max(0, Math.Min(9, idx))]++;
+                        // 評分只收 2.5～5（以 0.5 為一級）→ 6 格；更低的舊資料（轉移來的舊共用評分）算進 2.5 那格
+                        int idx = (int)Math.Round(kv.Value * 2) - 5;
+                        stat.Dist[Math.Max(0, Math.Min(5, idx))]++;
                         List<KeyValuePair<string, double>> raters;
                         if (byTitle.TryGetValue(kv.Key, out raters) == false)
                         {
