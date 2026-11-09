@@ -35,6 +35,8 @@ namespace WhatSearch.Services
         int Count();
         /// <summary>舊的共用評分筆數，以及每個使用者各有幾筆</summary>
         RatingStats GetStats();
+        /// <summary>管理頁的統計：每位使用者的筆數／平均／星等分布、最多人評過與分歧最大的作品（不掃資料夾，只算評分檔）</summary>
+        RatingInsights GetInsights();
         /// <summary>把舊的共用評分（ratings.json）轉給指定使用者：overwrite 為 false 時，該使用者已經評過的項目保留他自己的。轉完舊的共用評分會清空（轉之前先備份）。回傳轉入筆數，skipped 是因為已有自己的評分而略過的筆數</summary>
         int TransferLegacy(string toUser, bool overwrite, out int skipped, out string backupName);
         /// <summary>刪除指定使用者的全部評分（給已經刪除的會員用；刪之前先備份 ratings.users.json）。回傳實際刪掉的評分筆數，removedUsers 是移除的使用者數</summary>
@@ -351,6 +353,82 @@ namespace WhatSearch.Services
                     Legacy = Load().Count,
                     Users = LoadUsers().Select(kv => new RatingUserCount { Name = kv.Key, Count = kv.Value.Count }).OrderBy(t => t.Name, StringComparer.CurrentCultureIgnoreCase).ToList()
                 };
+            }
+        }
+
+        public RatingInsights GetInsights()
+        {
+            const int Top = 10;
+            lock (thisLock)
+            {
+                var result = new RatingInsights();
+                // key → { 使用者: 評分 }，只收有給分（大於 0）的
+                var byTitle = new Dictionary<string, List<KeyValuePair<string, double>>>(StringComparer.Ordinal);
+                foreach (var u in LoadUsers())
+                {
+                    var stat = new RatingUserStat { Name = u.Key };
+                    double sum = 0;
+                    foreach (var kv in u.Value)
+                    {
+                        if (kv.Value <= 0)
+                        {
+                            continue;
+                        }
+                        stat.Count++;
+                        sum += kv.Value;
+                        if (kv.Key.StartsWith(AlbumKeyPrefix, StringComparison.Ordinal))
+                        {
+                            stat.Album++;
+                        }
+                        else
+                        {
+                            stat.Anime++;
+                        }
+                        int idx = (int)Math.Round(kv.Value * 2) - 1;
+                        stat.Dist[Math.Max(0, Math.Min(9, idx))]++;
+                        List<KeyValuePair<string, double>> raters;
+                        if (byTitle.TryGetValue(kv.Key, out raters) == false)
+                        {
+                            raters = new List<KeyValuePair<string, double>>();
+                            byTitle[kv.Key] = raters;
+                        }
+                        raters.Add(new KeyValuePair<string, double>(u.Key, kv.Value));
+                    }
+                    stat.Avg = stat.Count == 0 ? 0 : Math.Round(sum / stat.Count, 2);
+                    result.Users.Add(stat);
+                }
+                result.Users = result.Users
+                    .OrderByDescending(t => t.Count)
+                    .ThenBy(t => t.Name, StringComparer.CurrentCultureIgnoreCase)
+                    .ToList();
+
+                var titles = new List<RatingTitleStat>();
+                foreach (var kv in byTitle)
+                {
+                    if (kv.Value.Count < 2)
+                    {
+                        continue;
+                    }
+                    bool isAlbum = kv.Key.StartsWith(AlbumKeyPrefix, StringComparison.Ordinal);
+                    var raters = kv.Value.OrderBy(t => t.Key, StringComparer.CurrentCultureIgnoreCase).ToList();
+                    titles.Add(new RatingTitleStat
+                    {
+                        Name = isAlbum ? kv.Key.Substring(AlbumKeyPrefix.Length) : kv.Key,
+                        Kind = isAlbum ? "album" : "anime",
+                        Count = raters.Count,
+                        Avg = Math.Round(raters.Average(t => t.Value), 2),
+                        Spread = raters.Max(t => t.Value) - raters.Min(t => t.Value),
+                        Detail = string.Join("、", raters.Select(t => t.Key + " " + t.Value.ToString("0.#") + " 星"))
+                    });
+                }
+                result.MostRated = titles
+                    .OrderByDescending(t => t.Count).ThenByDescending(t => t.Avg).ThenBy(t => t.Name, StringComparer.CurrentCultureIgnoreCase)
+                    .Take(Top).ToList();
+                result.Divergent = titles
+                    .Where(t => t.Spread > 0)
+                    .OrderByDescending(t => t.Spread).ThenByDescending(t => t.Count).ThenBy(t => t.Name, StringComparer.CurrentCultureIgnoreCase)
+                    .Take(Top).ToList();
+                return result;
             }
         }
 

@@ -40,6 +40,58 @@ namespace WhatSearch.Models
         public List<RatingUserCount> Users { get; set; } = new List<RatingUserCount>();
     }
 
+    /// <summary>一位使用者的評分統計（0 = 明確設為「未評分」不算）</summary>
+    public class RatingUserStat
+    {
+        [JsonPropertyName("name")]
+        public string Name { get; set; }
+        /// <summary>有給分（大於 0）的筆數</summary>
+        [JsonPropertyName("count")]
+        public int Count { get; set; }
+        [JsonPropertyName("anime")]
+        public int Anime { get; set; }
+        [JsonPropertyName("album")]
+        public int Album { get; set; }
+        /// <summary>平均給分；沒有評分時為 0</summary>
+        [JsonPropertyName("avg")]
+        public double Avg { get; set; }
+        /// <summary>星等分布：10 格，依序是 0.5、1、1.5 … 5 星各幾筆</summary>
+        [JsonPropertyName("dist")]
+        public int[] Dist { get; set; } = new int[10];
+    }
+
+    /// <summary>被兩位以上使用者評過的作品</summary>
+    public class RatingTitleStat
+    {
+        [JsonPropertyName("name")]
+        public string Name { get; set; }
+        /// <summary>anime（動畫）／album（專輯）</summary>
+        [JsonPropertyName("kind")]
+        public string Kind { get; set; }
+        /// <summary>幾位使用者評過</summary>
+        [JsonPropertyName("count")]
+        public int Count { get; set; }
+        [JsonPropertyName("avg")]
+        public double Avg { get; set; }
+        /// <summary>最高分與最低分的差</summary>
+        [JsonPropertyName("spread")]
+        public double Spread { get; set; }
+        /// <summary>誰評了多少，例如「admin 5 星、bob 2 星」</summary>
+        [JsonPropertyName("detail")]
+        public string Detail { get; set; }
+    }
+
+    /// <summary>評分管理頁的統計：每位使用者的排名資料、最多人評過、分歧最大的作品（只算每人自己的評分，舊的共用評分不算）</summary>
+    public class RatingInsights
+    {
+        [JsonPropertyName("users")]
+        public List<RatingUserStat> Users { get; set; } = new List<RatingUserStat>();
+        [JsonPropertyName("mostRated")]
+        public List<RatingTitleStat> MostRated { get; set; } = new List<RatingTitleStat>();
+        [JsonPropertyName("divergent")]
+        public List<RatingTitleStat> Divergent { get; set; } = new List<RatingTitleStat>();
+    }
+
     public class RatingScanResult
     {
         /// <summary>ratings.json 的總筆數</summary>
