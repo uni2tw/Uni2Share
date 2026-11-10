@@ -34,5 +34,7 @@ namespace WhatSearch.Services.Interfaces
         bool Login(HttpResponse response, string name, string password, int cookieDays, string clientIp, out string message);
         /// <summary>管理者解除鎖定並把失敗次數歸零；找不到會員回傳 false</summary>
         bool UnlockMember(string name);
+        /// <summary>刪除會員帳號（只刪帳號本身；他的評分、愛心、置頂等由呼叫端另外清）。找不到回傳 false。已登入的裝置因為存取權杖對不上，下次請求就失效</summary>
+        bool DeleteMember(string name);
     }
 }

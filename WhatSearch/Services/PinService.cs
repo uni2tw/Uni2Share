@@ -14,6 +14,8 @@ namespace WhatSearch.Services
         List<string> Get(string member);
         /// <summary>置頂或取消置頂；已經是想要的狀態回傳 true（不算錯）。置頂超過上限回傳 false 並說明原因</summary>
         bool Set(string member, string id, bool pin, out string error);
+        /// <summary>整份移除某個會員的置頂（刪除會員時用）；回傳移除的筆數</summary>
+        int RemoveMember(string member);
     }
 
     /// <summary>
@@ -73,6 +75,26 @@ namespace WhatSearch.Services
                     return new List<string>();
                 }
                 return list.ToList();
+            }
+        }
+
+        public int RemoveMember(string member)
+        {
+            if (string.IsNullOrEmpty(member))
+            {
+                return 0;
+            }
+            lock (thisLock)
+            {
+                var all = Load();
+                List<string> list;
+                if (all.TryGetValue(member, out list) == false)
+                {
+                    return 0;
+                }
+                all.Remove(member);
+                SafeFile.WriteAllTextAtomic(DataPath(), JsonHelper.Serialize(all, indented: true));
+                return list.Count;
             }
         }
 
