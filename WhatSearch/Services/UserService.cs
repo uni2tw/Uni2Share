@@ -20,6 +20,8 @@ namespace WhatSearch.Services
 
         /// <summary>密碼連續錯誤幾次就鎖住帳號</summary>
         public const int MaxLoginFailures = 5;
+        /// <summary>管理者帳號密碼連續錯誤到幾次就在「異常請求」頁留一筆提醒（比鎖住的次數早，來得及處理）；鎖住那一刻也會再留一筆</summary>
+        public const int AdminLoginAlertThreshold = 3;
         // 不存在的帳號也要有同樣的「錯幾次、鎖住」反應，否則看訊息就知道帳號存不存在；這份記錄只放記憶體，過一段時間沒再試就忘掉
         const int UnknownNameMinutes = 30;
         const int UnknownNameMax = 1000;
@@ -445,6 +447,7 @@ namespace WhatSearch.Services
                 // 在 Update 裡累加（會鎖住整份資料），同時有多個請求猜密碼時次數才不會算少
                 int count = 0;
                 bool locked = false;
+                bool justLocked = false;
                 mp.Update(name, m =>
                 {
                     if (m.Locked == false)
@@ -453,11 +456,24 @@ namespace WhatSearch.Services
                         if (m.FailedLoginCount >= MaxLoginFailures)
                         {
                             m.Locked = true;
+                            justLocked = true;
                         }
                     }
                     count = m.FailedLoginCount;
                     locked = m.Locked;
                 });
+                // 管理者帳號被猜密碼：到達提醒門檻、或剛被鎖住的那一次才留一筆（每次失敗都記會太吵）
+                if (mem.IsAdmin && (justLocked || (locked == false && count == AdminLoginAlertThreshold)))
+                {
+                    try
+                    {
+                        Ioc.Get<IAbnormalRequestService>().RecordAdminLoginFailure(mem.Name, clientIp, count, locked);
+                    }
+                    catch (Exception ex)
+                    {
+                        logger.Warn(ex, "記錄管理者登入失敗事件失敗");
+                    }
+                }
                 if (locked)
                 {
                     message = LockedNowMessage();
