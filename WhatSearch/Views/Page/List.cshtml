@@ -1049,7 +1049,7 @@
 
     <div class="lightbox-overlay" v-if="tierPreview">
         <div class="lightbox-overlay-content" style="background:#fff; color:#222; border-radius:8px; padding:12px 14px; max-height:94vh; overflow:auto;">
-            <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; margin-bottom:8px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; position:sticky; top:-12px; z-index:2; background:#fff; margin:-12px 0 0; padding:12px 0 8px;">
                 <div style="font-weight:bold;">評分圖（{{ tierPreview.count }} 部）</div>
                 <div style="display:flex; gap:6px;">
                     <a class="btn btn-sm btn-success" :href="tierPreview.url" :download="tierPreview.fileName" v-on:click="vm_downloadTier($event)"><i class="fa fa-download"></i> 下載圖片</a>
@@ -1063,7 +1063,7 @@
 
     <div class="lightbox-overlay" v-if="coverEdit">
         <div class="lightbox-overlay-content" style="background:#fff; color:#222; border-radius:8px; padding:12px 14px; max-height:94vh; overflow:auto; width:min(560px, 96vw);">
-            <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; margin-bottom:8px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; position:sticky; top:-12px; z-index:2; background:#fff; margin:-12px 0 0; padding:12px 0 8px;">
                 <div style="font-weight:bold;">更換封面</div>
                 <button type="button" class="btn btn-sm btn-outline-secondary" v-on:click="vm_closeCoverEdit()"><i class="fa fa-times"></i></button>
             </div>
