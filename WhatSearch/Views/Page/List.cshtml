@@ -884,7 +884,7 @@
             </div>
             <div style="position:relative;" :style="{ minHeight: nowPlayingVideo.error ? '200px' : null }">
                 <video ref="videoEl" class="player-video" :src="nowPlayingVideo.url" controls autoplay playsinline
-                    style="width:100%; max-height:80vh; background:#000;"
+                    style="width:100%; max-height:calc(100vh - 90px); max-height:calc(100dvh - 90px); background:#000;"
                     v-on:loadedmetadata="vm_videoLoaded"
                     v-on:timeupdate="vm_videoTimeUpdate"
                     v-on:pause="vm_videoPause"
@@ -937,7 +937,7 @@
                     <i class="fa fa-times"></i>
                 </button>
             </div>
-            <img :src="previewImage.url" style="width:100%; max-height:80vh; object-fit:contain; background:#000;" />
+            <img :src="previewImage.url" style="width:100%; max-height:calc(100vh - 90px); max-height:calc(100dvh - 90px); object-fit:contain; background:#000;" />
         </div>
         <button type="button" class="btn btn-outline-light lightbox-nav-btn" style="right:10px"
             v-if="previewImage.hasNext" v-on:click="vm_previewStep(1)">
@@ -946,8 +946,8 @@
     </div>
 
     <div class="lightbox-overlay" v-if="previewText.id">
-        <div class="lightbox-overlay-content" style="background:#fff; color:#222; border-radius:8px; max-height:85vh; overflow:auto; padding:16px 20px;">
-            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+        <div class="lightbox-overlay-content" style="background:#fff; color:#222; border-radius:8px; max-height:85%; overflow:auto; padding:16px 20px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; position:sticky; top:-16px; z-index:2; background:#fff; margin:-16px 0 0; padding:16px 0 12px;">
                 <div style="font-weight:bold; font-size:1.1rem; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; margin-right:10px;">{{ previewText.title }}</div>
                 <button type="button" class="btn btn-sm btn-outline-secondary" v-on:click="vm_closeTextPreview()">
                     <i class="fa fa-times"></i>
@@ -1010,8 +1010,8 @@
     </div>
 
     <div class="lightbox-overlay" v-if="cueDialog">
-        <div class="lightbox-overlay-content" style="background:#fff; color:#222; border-radius:8px; padding:14px 16px; width:min(460px, 94vw); max-height:92vh; overflow:auto;">
-            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+        <div class="lightbox-overlay-content" style="background:#fff; color:#222; border-radius:8px; padding:14px 16px; width:min(460px, 94vw); max-height:92%; overflow:auto;">
+            <div style="display:flex; justify-content:space-between; align-items:center; position:sticky; top:-14px; z-index:2; background:#fff; margin:-14px 0 0; padding:14px 0 8px;">
                 <div style="font-weight:bold;">CUE 拆成單曲 MP3</div>
                 <button type="button" class="btn btn-sm btn-outline-secondary" v-on:click="vm_cueClose()"><i class="fa fa-times"></i></button>
             </div>
@@ -1048,7 +1048,7 @@
     </div>
 
     <div class="lightbox-overlay" v-if="tierPreview">
-        <div class="lightbox-overlay-content" style="background:#fff; color:#222; border-radius:8px; padding:12px 14px; max-height:94vh; overflow:auto;">
+        <div class="lightbox-overlay-content" style="background:#fff; color:#222; border-radius:8px; padding:12px 14px; max-height:94%; overflow:auto;">
             <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; position:sticky; top:-12px; z-index:2; background:#fff; margin:-12px 0 0; padding:12px 0 8px;">
                 <div style="font-weight:bold;">評分圖（{{ tierPreview.count }} 部）</div>
                 <div style="display:flex; gap:6px;">
@@ -1062,7 +1062,7 @@
     </div>
 
     <div class="lightbox-overlay" v-if="coverEdit">
-        <div class="lightbox-overlay-content" style="background:#fff; color:#222; border-radius:8px; padding:12px 14px; max-height:94vh; overflow:auto; width:min(560px, 96vw);">
+        <div class="lightbox-overlay-content" style="background:#fff; color:#222; border-radius:8px; padding:12px 14px; max-height:94%; overflow:auto; width:min(560px, 96vw);">
             <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; position:sticky; top:-12px; z-index:2; background:#fff; margin:-12px 0 0; padding:12px 0 8px;">
                 <div style="font-weight:bold;">更換封面</div>
                 <button type="button" class="btn btn-sm btn-outline-secondary" v-on:click="vm_closeCoverEdit()"><i class="fa fa-times"></i></button>
