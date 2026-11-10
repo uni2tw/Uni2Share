@@ -15,6 +15,8 @@ namespace WhatSearch.Services
         FavoriteData Get(string member);
         /// <summary>加入或移除；回傳是否有實際變動</summary>
         bool Set(string member, string kind, string id, bool fav);
+        /// <summary>整份移除某個會員的最愛（刪除會員時用）；回傳移除的筆數（專輯＋單曲）</summary>
+        int RemoveMember(string member);
     }
 
     public class FavoriteData
@@ -85,6 +87,27 @@ namespace WhatSearch.Services
                     return new FavoriteData();
                 }
                 return new FavoriteData { Albums = data.Albums.ToList(), Tracks = data.Tracks.ToList() };
+            }
+        }
+
+        public int RemoveMember(string member)
+        {
+            if (string.IsNullOrEmpty(member))
+            {
+                return 0;
+            }
+            lock (thisLock)
+            {
+                var all = Load();
+                FavoriteData data;
+                if (all.TryGetValue(member, out data) == false)
+                {
+                    return 0;
+                }
+                int n = data.Albums.Count + data.Tracks.Count;
+                all.Remove(member);
+                Save();
+                return n;
             }
         }
 

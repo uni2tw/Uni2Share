@@ -217,6 +217,16 @@ namespace WhatSearch.Services
             return true;
         }
 
+        public bool DeleteMember(string name)
+        {
+            bool ok = mp.Remove(name);
+            if (ok)
+            {
+                logger.Info("管理者刪除會員：{0}", name);
+            }
+            return ok;
+        }
+
         public bool UpdateMemberRole(string name, MemberRole role)
         {
             return mp.Update(name, m =>

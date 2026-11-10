@@ -201,6 +201,43 @@
                             }
                         }
                     },
+                    vm_delete: function (member) {
+                        var self = this;
+                        if (member.deleting || member.self || member.savedRole === 'admin') {
+                            return;
+                        }
+                        member.deleting = true;
+                        axios.get('/admin/memberUsage', { params: { name: member.name } }).then(function (res) {
+                            var u = res.data || {};
+                            if (u.success !== 1) {
+                                self.vm_showAlert(u.message || '查詢失敗');
+                                return null;
+                            }
+                            var text = '要刪除會員「' + member.display + '」（帳號 ' + member.name + '）嗎？\n\n'
+                                + '他的下列資料會一併清除：\n'
+                                + '・評分 ' + u.ratings + ' 筆（會先備份評分檔）\n'
+                                + '・我的最愛 ' + (u.favAlbums + u.favTracks) + ' 筆（專輯 ' + u.favAlbums + '、單曲 ' + u.favTracks + '）\n'
+                                + '・置頂 ' + u.pins + ' 個\n\n'
+                                + '他已登入的裝置會立刻失效。刪除後無法復原。';
+                            if (!window.confirm(text)) {
+                                return null;
+                            }
+                            return axios.post('/admin/deleteMember', { 'name': member.name }).then(function (res2) {
+                                var d = res2.data || {};
+                                if (d.success === 1) {
+                                    var i = self.members.indexOf(member);
+                                    if (i >= 0) {
+                                        self.members.splice(i, 1);
+                                    }
+                                }
+                                self.vm_showAlert(d.message || '刪除失敗');
+                            });
+                        }).catch(function () {
+                            self.vm_showAlert('刪除失敗，請稍後再試');
+                        }).finally(function () {
+                            member.deleting = false;
+                        });
+                    },
                     vm_unlock: function (member) {
                         var self = this;
                         if (member.unlocking) {
@@ -343,6 +380,7 @@
                             <button type="button" class="btn btn-sm btn-primary" :disabled="!vm_changed(member) || member.saving" v-on:click="vm_update(member)"><i class="fa fa-floppy-disk"></i> 儲存</button>
                             <button v-if="member.locked" type="button" class="btn btn-sm btn-danger" style="margin-left:4px;" :disabled="member.unlocking" title="解除鎖定，讓這位會員可以再嘗試登入" v-on:click="vm_unlock(member)"><i class="fa fa-lock-open"></i> 解除鎖定</button>
                             <button type="button" class="btn btn-sm btn-outline-secondary" style="margin-left:4px;" title="重設這位會員的密碼" v-on:click="vm_openReset(member)"><i class="fa fa-key"></i> 重設密碼</button>
+                            <button type="button" class="btn btn-sm btn-outline-danger" style="margin-left:4px;" :disabled="member.self || member.savedRole === 'admin' || member.deleting" :title="member.self ? '不能刪除自己' : (member.savedRole === 'admin' ? '管理者不能直接刪除，請先改成會員或待啟用' : '刪除這位會員與他的評分、最愛、置頂')" v-on:click="vm_delete(member)"><i class="fa fa-trash"></i> 刪除</button>
                         </td>
                     </tr>
                 </tbody>

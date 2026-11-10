@@ -24,6 +24,8 @@ namespace WhatSearch.Services
         long GetLastRead(string member);
         int GetUnread(string member);
         void MarkRead(string member);
+        /// <summary>移除某個會員「上次看新上架」的記錄（刪除會員時用）</summary>
+        void RemoveMember(string member);
         /// <summary>某個資料夾裡有哪些項目要加「新」標記（badgeDays 內）：子資料夾（有通知的作品／專輯）與檔案（新增的集數）</summary>
         NewsBadges GetBadges(string folderRel);
     }
@@ -355,6 +357,22 @@ namespace WhatSearch.Services
                 candidates = events.Where(e => e.Time > last).ToList();
             }
             return candidates.Count(Exists);
+        }
+
+        public void RemoveMember(string member)
+        {
+            if (string.IsNullOrEmpty(member))
+            {
+                return;
+            }
+            EnsureLoaded();
+            lock (gate)
+            {
+                if (lastRead.Remove(member))
+                {
+                    try { SaveJson(DataPath("userData", "news-read.json"), lastRead); } catch (Exception ex) { logger.Warn(ex, "寫入 news-read.json 失敗"); }
+                }
+            }
         }
 
         public void MarkRead(string member)

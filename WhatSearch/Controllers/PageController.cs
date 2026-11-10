@@ -203,6 +203,71 @@ namespace WhatSearch.Controllers
             return new { Success = 1, Message = string.Format("已重設 {0} 的密碼", mem.DisplayName) + (mem.Locked ? "，並解除鎖定" : string.Empty) };
         }
 
+        /// <summary>刪除會員前先看他有多少資料（評分、最愛、置頂），給確認視窗顯示</summary>
+        [HttpGet]
+        [Route("admin/memberUsage")]
+        [RoleAuthorize("Admin")]
+        public dynamic MemberUsage(string name)
+        {
+            Member mem = string.IsNullOrEmpty(name) ? null : Ioc.Get<IUserService>().GetMember(name);
+            if (mem == null)
+            {
+                return new { Success = 0, Message = "找不到這個會員" };
+            }
+            var rating = Ioc.Get<IRatingService>().GetStats().Users.FirstOrDefault(u => string.Equals(u.Name, mem.Name, StringComparison.OrdinalIgnoreCase));
+            var fav = Ioc.Get<IFavoriteService>().Get(mem.Name);
+            return new
+            {
+                Success = 1,
+                Ratings = rating == null ? 0 : rating.Count,
+                FavAlbums = fav.Albums.Count,
+                FavTracks = fav.Tracks.Count,
+                Pins = Ioc.Get<IPinService>().Get(mem.Name).Count
+            };
+        }
+
+        /// <summary>
+        /// 刪除會員：不能刪自己，也不能直接刪管理者（要先改成會員或待啟用）。
+        /// 先刪帳號（他立刻不能再寫資料），再清他的評分（先備份）、最愛、置頂、新上架已讀記錄；
+        /// 萬一清資料中途失敗，留下的評分在「評分管理」會被當成已刪除會員的評分，可以再清。
+        /// </summary>
+        [HttpPost]
+        [Route("admin/deleteMember")]
+        [RoleAuthorize("Admin")]
+        public dynamic DeleteMember([FromBody] DeleteMemberModel model)
+        {
+            IUserService srv = Ioc.Get<IUserService>();
+            Member mem = model == null || string.IsNullOrEmpty(model.name) ? null : srv.GetMember(model.name);
+            if (mem == null)
+            {
+                return new { Success = 0, Message = "找不到這個會員" };
+            }
+            if (string.Equals(mem.Name, User.Identity.Name, StringComparison.Ordinal))
+            {
+                return new { Success = 0, Message = "不能刪除自己" };
+            }
+            if (mem.IsAdmin)
+            {
+                return new { Success = 0, Message = "不能直接刪除管理者，請先把身分改成「會員」或「待啟用」再刪除" };
+            }
+            if (srv.DeleteMember(mem.Name) == false)
+            {
+                return new { Success = 0, Message = "刪除失敗，會員可能已經被刪除" };
+            }
+            int removedUsers;
+            string backup;
+            int ratings = Ioc.Get<IRatingService>().RemoveUsers(new List<string> { mem.Name }, out removedUsers, out backup);
+            int favs = Ioc.Get<IFavoriteService>().RemoveMember(mem.Name);
+            int pins = Ioc.Get<IPinService>().RemoveMember(mem.Name);
+            Ioc.Get<INewsService>().RemoveMember(mem.Name);
+            return new
+            {
+                Success = 1,
+                Message = string.Format("已刪除 {0}，並清除他的評分 {1} 筆、最愛 {2} 筆、置頂 {3} 筆", mem.DisplayName, ratings, favs, pins)
+                    + (backup != null ? "；評分原檔備份在 data\\" + backup : string.Empty)
+            };
+        }
+
         /// <summary>管理者解除會員的鎖定（密碼連續錯誤太多次被鎖住），失敗次數一併歸零</summary>
         [HttpPost]
         [Route("admin/unlockMember")]
@@ -601,6 +666,11 @@ namespace WhatSearch.Controllers
         public class ConvertCancelModel
         {
             public string id { get; set; }
+        }
+
+        public class DeleteMemberModel
+        {
+            public string name { get; set; }
         }
 
         public class UnlockMemberModel

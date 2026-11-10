@@ -81,6 +81,21 @@ namespace WhatSearch.DataProviders
             }
         }
 
+        public bool Remove(string name)
+        {
+            lock (thisLock)
+            {
+                var members = GetMembers();
+                int n = members.RemoveAll(t => t.Name == name);
+                if (n == 0)
+                {
+                    return false;
+                }
+                Write(members);
+                return true;
+            }
+        }
+
         // 呼叫端已持有 thisLock；先寫暫存檔再取代，被防毒等暫時鎖住時 SafeFile 會自動重試
         static void Write(List<Member> members)
         {
