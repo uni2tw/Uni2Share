@@ -16,6 +16,8 @@ namespace WhatSearch.Services
     {
         /// <summary>記一次「沒有對應路由的 404」；同一個 IP 在時間窗內累積到門檻就留下一筆事件</summary>
         void Record(string ip, string path, string userAgent);
+        /// <summary>記一筆「管理者帳號登入失敗」事件（連續錯誤到達提醒門檻，或帳號剛被鎖住）；由登入流程呼叫，事件和 404 事件放在同一份清單、共用未讀數</summary>
+        void RecordAdminLoginFailure(string account, string ip, int failCount, bool locked);
         AbnormalSnapshot Get();
         /// <summary>管理者上次看之後新增的事件數</summary>
         int GetUnread();
@@ -44,6 +46,15 @@ namespace WhatSearch.Services
         /// <summary>路徑像是在探測（.php、.env、wp-admin…）</summary>
         [JsonPropertyName("suspicious")]
         public bool Suspicious { get; set; }
+        /// <summary>事件種類：null（舊資料也是）= 404 掃描；"login" = 管理者帳號登入失敗</summary>
+        [JsonPropertyName("kind")]
+        public string Kind { get; set; }
+        /// <summary>登入失敗事件：被猜密碼的管理者帳號</summary>
+        [JsonPropertyName("account")]
+        public string Account { get; set; }
+        /// <summary>登入失敗事件：這一筆發生時帳號是否已被鎖住</summary>
+        [JsonPropertyName("locked")]
+        public bool Locked { get; set; }
     }
 
     public class AbnormalState
@@ -203,6 +214,39 @@ namespace WhatSearch.Services
                 Save();
                 logger.Warn("異常請求：{0} 在 {1} 秒內有 {2} 次 404（{3}）{4}", ip, cfg.WindowSeconds, ev.Count,
                     string.Join(", ", ev.Paths), ev.Suspicious ? "，路徑可疑" : string.Empty);
+            }
+        }
+
+        public void RecordAdminLoginFailure(string account, string ip, int failCount, bool locked)
+        {
+            AbnormalRequestConfig cfg = Ioc.GetConfig().Abnormal;
+            if (cfg == null || cfg.Enabled == false)
+            {
+                return;
+            }
+            long now = NowMs();
+            lock (gate)
+            {
+                AbnormalState s = Load();
+                AbnormalEvent ev = new AbnormalEvent
+                {
+                    Time = now,
+                    Last = now,
+                    Ip = Clean(ip),
+                    Count = failCount,
+                    Kind = "login",
+                    Account = Clean(account),
+                    Locked = locked,
+                    UserAgent = string.Empty
+                };
+                s.Events.Add(ev);
+                int maxEvents = Math.Max(10, cfg.MaxEvents);
+                if (s.Events.Count > maxEvents)
+                {
+                    s.Events.RemoveRange(0, s.Events.Count - maxEvents);
+                }
+                Save();
+                logger.Warn("管理者帳號 {0} 登入失敗：密碼連續錯誤 {1} 次{2}（來源 {3}）", ev.Account, failCount, locked ? "，已鎖住" : string.Empty, ev.Ip);
             }
         }
 

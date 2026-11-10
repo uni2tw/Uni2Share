@@ -102,6 +102,7 @@
         <div style="font-size:13px; color:#666; margin:0 0 12px 0; line-height:1.7;">
             同一個 IP 在 <b>{{ data ? data.windowSeconds : 60 }}</b> 秒內有 <b>{{ data ? data.threshold : 3 }}</b> 次「這個網站根本沒有的網址」(404)，就記一筆（常是網路上的掃描器亂試 .php、.env 之類）。
             記錄後 {{ data ? data.cooldownMinutes : 10 }} 分鐘內同一個 IP 只累加次數，不重複新增。這裡只偵測與記錄，不會封鎖。
+            另外，<b>管理者帳號</b>被猜密碼（連續錯誤達 3 次，以及帳號被鎖住那一刻）也會在這裡留一筆「管理者登入失敗」，不用等到帳號被鎖才發現。
             <span v-if="data && !data.enabled" style="color:#b26a00;"><i class="fa fa-triangle-exclamation"></i> 偵測目前是關閉的（config 的 abnormal.enabled）</span>
             <span v-if="failed" style="color:#dc3545;"><i class="fa fa-triangle-exclamation"></i> 載入失敗</span>
         </div>
@@ -137,10 +138,12 @@
                             <td style="font-family:monospace; font-size:13px; white-space:nowrap;">
                                 {{ ev.ip }}
                                 <span v-if="ev.suspicious" class="badge bg-danger" title="路徑像是在探測（.php、.env、wp-admin…）" style="margin-left:4px;">可疑</span>
+                                <span v-if="ev.kind === 'login'" class="badge" :class="ev.locked ? 'bg-danger' : 'bg-warning text-dark'" style="margin-left:4px; font-family:sans-serif;">管理者登入失敗</span>
                             </td>
                             <td style="font-size:13px; white-space:nowrap;" :title="'最後一次 ' + vm_time(ev.last)">{{ ev.count }}</td>
                             <td style="font-family:monospace; font-size:12px; word-break:break-all;">
-                                <div v-for="p in ev.paths" :key="p">{{ p }}</div>
+                                <div v-if="ev.kind === 'login'" style="font-family:sans-serif;">帳號 <b>{{ ev.account }}</b> 密碼連續錯誤 {{ ev.count }} 次<span v-if="ev.locked" style="color:#dc3545;">，帳號已鎖住（到「會員管理」解除鎖定）</span></div>
+                                <template v-else><div v-for="p in ev.paths" :key="p">{{ p }}</div></template>
                             </td>
                             <td style="font-size:12px; color:#666; word-break:break-all; max-width:260px;">{{ ev.ua }}</td>
                         </tr>
