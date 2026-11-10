@@ -715,6 +715,8 @@
                 v-on:click="favTab = 'album'">專輯 ({{ favAlbumCount }})</button>
             <button type="button" class="btn btn-sm" :class="favTab === 'track' ? 'btn-success' : 'btn-outline-success'"
                 v-on:click="favTab = 'track'">單曲 ({{ favTrackCount }})</button>
+            <button v-if="favMissing > 0" type="button" class="btn btn-sm btn-outline-danger" :disabled="favPruning" v-on:click="vm_pruneFavorites()"
+                title="資料夾改名或刪除後找不到的最愛，從清單中清掉"><i class="fa fa-broom"></i> 清除找不到的 {{ favMissing }} 筆</button>
             <label v-if="favTab === 'track'" style="font-size:14px; cursor:pointer; user-select:none; margin-left:6px;">
                 <input type="checkbox" v-model="loudnessOn" /> 音量平衡<span v-if="favTarget !== null" style="color:#999;">（目標 {{ favTarget }} LUFS）</span>
             </label>
@@ -1248,6 +1250,10 @@
                     pinMax: 50,
                     favTrackMap: {},
                     favView: false,
+                    // 我的最愛裡找不到的筆數與前幾筆名稱（資料夾改名或刪除）；清除中的旗標
+                    favMissing: 0,
+                    favMissingNames: [],
+                    favPruning: false,
                     favTab: 'album',
                     favTarget: null,
                     favPending: 0,
@@ -2622,6 +2628,8 @@
                         self.currentRating = null;
                         self.favTarget = res.data.target;
                         self.favPending = res.data.pending || 0;
+                        self.favMissing = res.data.missing || 0;
+                        self.favMissingNames = res.data.missingNames || [];
                         self.vm_scheduleFavPoll();
                         self.discGroups = null;
                         self.notFound = null;
@@ -2642,6 +2650,33 @@
                         }
                     }).finally(() => {
                         self.loading = false;
+                    });
+                },
+                // 清除自己最愛裡找不到的項目：確認視窗列出前 10 筆名稱；實際清哪些由伺服器現在查到的為準
+                vm_pruneFavorites: function () {
+                    if (this.favPruning || this.favMissing <= 0) {
+                        return;
+                    }
+                    let names = this.favMissingNames.map(n => '・' + n).join('\n');
+                    let more = this.favMissing > this.favMissingNames.length ? '\n…還有 ' + (this.favMissing - this.favMissingNames.length) + ' 筆' : '';
+                    if (!window.confirm('要清除這 ' + this.favMissing + ' 筆找不到的最愛嗎？\n\n' + names + more + '\n\n多半是資料夾改名或刪除了。清除後無法復原；如果只是分享磁碟暫時沒連上，請先不要清。')) {
+                        return;
+                    }
+                    this.favPruning = true;
+                    api.pruneFavorites().then(res => {
+                        let d = res.data || {};
+                        alert(d.message || '清除失敗');
+                        if (d.ok) {
+                            return this.vm_showFavorites();
+                        }
+                    }).catch(err => {
+                        if (err && err.response && err.response.status === 401) {
+                            this.redirectToLogin('');
+                        } else {
+                            alert('清除失敗，請稍後再試');
+                        }
+                    }).finally(() => {
+                        this.favPruning = false;
                     });
                 },
                 // 還有單曲在背景分析響度時，每 4 秒更新一次；只就地更新響度欄位，不重建清單（保留播放中的標示與佇列）

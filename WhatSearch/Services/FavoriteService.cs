@@ -17,6 +17,8 @@ namespace WhatSearch.Services
         bool Set(string member, string kind, string id, bool fav);
         /// <summary>整份移除某個會員的最愛（刪除會員時用）；回傳移除的筆數（專輯＋單曲）</summary>
         int RemoveMember(string member);
+        /// <summary>一次移除某個會員的多筆最愛（清除找不到的項目用），只寫一次檔；回傳實際移除的筆數</summary>
+        int RemoveItems(string member, IEnumerable<string> albumIds, IEnumerable<string> trackIds);
     }
 
     public class FavoriteData
@@ -87,6 +89,30 @@ namespace WhatSearch.Services
                     return new FavoriteData();
                 }
                 return new FavoriteData { Albums = data.Albums.ToList(), Tracks = data.Tracks.ToList() };
+            }
+        }
+
+        public int RemoveItems(string member, IEnumerable<string> albumIds, IEnumerable<string> trackIds)
+        {
+            if (string.IsNullOrEmpty(member))
+            {
+                return 0;
+            }
+            lock (thisLock)
+            {
+                FavoriteData data;
+                if (Load().TryGetValue(member, out data) == false)
+                {
+                    return 0;
+                }
+                var albums = new HashSet<string>(albumIds ?? Enumerable.Empty<string>(), StringComparer.Ordinal);
+                var tracks = new HashSet<string>(trackIds ?? Enumerable.Empty<string>(), StringComparer.Ordinal);
+                int n = data.Albums.RemoveAll(albums.Contains) + data.Tracks.RemoveAll(tracks.Contains);
+                if (n > 0)
+                {
+                    Save();
+                }
+                return n;
             }
         }
 
