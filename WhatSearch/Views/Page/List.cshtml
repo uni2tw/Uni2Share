@@ -1055,7 +1055,7 @@
                 </div>
             </div>
             <img :src="tierPreview.url" style="width:100%; display:block; border-radius:6px;" />
-            <div style="font-size:12px; color:#888; margin-top:6px;">手機：按「下載圖片」會開分享面板（可儲存影像）；長按圖片也可以儲存或分享。<span v-if="tierPreview.missing">有 {{ tierPreview.missing }} 部找不到封面，用名稱色塊代替。</span></div>
+            <div style="font-size:12px; color:#888; margin-top:6px;">手機：<span v-if="vm_canShareTier()">按「下載圖片」會開分享面板（可儲存影像）；</span>長按圖片也可以儲存或分享。<span v-if="tierPreview.missing">有 {{ tierPreview.missing }} 部找不到封面，用名稱色塊代替。</span></div>
         </div>
     </div>
 
@@ -2295,21 +2295,25 @@
                 },
                 // 手機上「下載圖片」：blob 連結常被瀏覽器改成「檢視圖片」而把整個分頁導走，正在播放的音樂就停了。
                 // 能分享檔案的手機改叫出系統分享面板（有「儲存影像」），不離開頁面；其他環境照舊走一般下載連結
+                // 這支手機／瀏覽器能不能分享圖片檔：要手機、有 navigator.share，且瀏覽器接受 PNG 檔
+                // （分享檔案需要 HTTPS；站台是 http 時這裡一律是 false，提示文字與下載按鈕都走一般流程）
+                vm_canShareTier: function () {
+                    let isPhone = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent) || (/Macintosh/i.test(navigator.userAgent) && navigator.maxTouchPoints > 1);
+                    if (!isPhone || typeof navigator.share !== 'function' || typeof navigator.canShare !== 'function') {
+                        return false;
+                    }
+                    try {
+                        return !!navigator.canShare({ files: [new File([''], 'x.png', { type: 'image/png' })] });
+                    } catch (e) {
+                        return false;
+                    }
+                },
                 vm_downloadTier: function (ev) {
                     let t = this.tierPreview;
-                    let isPhone = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent) || (/Macintosh/i.test(navigator.userAgent) && navigator.maxTouchPoints > 1);
-                    if (!t || !t.blob || !isPhone || typeof navigator.share !== 'function' || typeof navigator.canShare !== 'function') {
+                    if (!t || !t.blob || !this.vm_canShareTier()) {
                         return;
                     }
-                    let file;
-                    try {
-                        file = new File([t.blob], t.fileName, { type: 'image/png' });
-                        if (!navigator.canShare({ files: [file] })) {
-                            return;
-                        }
-                    } catch (e) {
-                        return;
-                    }
+                    let file = new File([t.blob], t.fileName, { type: 'image/png' });
                     ev.preventDefault();
                     navigator.share({ files: [file], title: t.fileName }).catch(e => {
                         // 自己關掉分享面板（AbortError）不算錯；真的分享失敗就退回一般下載
