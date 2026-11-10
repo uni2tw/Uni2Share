@@ -45,6 +45,10 @@ api.setFavorite = function(kind, id, fav) {
         fav: fav
     });
 }
+// 清除自己最愛裡找不到的項目（資料夾已改名或刪除）
+api.pruneFavorites = function() {
+    return axios.post('/api/favorites/prune', {});
+}
 // 置頂的資料夾（每人各自，有上限）
 api.pins = function() {
     return axios.get('/api/pins');

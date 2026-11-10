@@ -730,10 +730,11 @@ namespace WhatSearch.WebAPIs
             FavoriteData data = favoriteService.Get(User.Identity.Name);
             List<FileInfoView> items = new List<FileInfoView>();
             int missing = 0;
+            List<string> missingNames = new List<string>();
             foreach (string id in Enumerable.Reverse(data.Albums))
             {
                 FileInfoView view = mainService.GetFolderView(id);
-                if (view == null) { missing++; } else { items.Add(view); }
+                if (view == null) { missing++; missingNames.Add(FavoriteNameOf(id)); } else { items.Add(view); }
             }
             int pending = 0;
             foreach (string id in data.Tracks)
@@ -742,6 +743,7 @@ namespace WhatSearch.WebAPIs
                 if (view == null)
                 {
                     missing++;
+                    missingNames.Add(FavoriteNameOf(id));
                     continue;
                 }
                 string trackPath = fimgr.GetPath(id);
@@ -761,7 +763,52 @@ namespace WhatSearch.WebAPIs
                 message += "（另有 " + missing + " 筆找不到，可能已改名或刪除）";
             }
             // pending：還在背景分析響度的單曲數；前端據此定時更新。target：目標響度（LUFS）
-            return new { message, items, pending, target = loudnessService.TargetLufs };
+            return new { message, items, pending, target = loudnessService.TargetLufs, missing, missingNames = missingNames.Take(10).ToList() };
+        }
+
+        /// <summary>愛心的 id 是相對路徑的 Base64，解回來取最後一段當名稱（給「清除找不到的」確認視窗顯示）；解不開就原樣回傳</summary>
+        static string FavoriteNameOf(string id)
+        {
+            try
+            {
+                string rel = Helper.DecodeUrlBase64(id).Replace('\\', '/').TrimEnd('/');
+                int i = rel.LastIndexOf('/');
+                return i >= 0 ? rel.Substring(i + 1) : rel;
+            }
+            catch (Exception)
+            {
+                return id;
+            }
+        }
+
+        /// <summary>
+        /// 清除自己「我的最愛」裡找不到的項目（資料夾已改名或刪除）。以伺服器現在查到的為準，不信任前端傳來的清單。
+        /// 全部都找不到時不清：分享磁碟沒連上時所有項目都會被當成找不到，一鍵清掉會把整份最愛清空。
+        /// </summary>
+        [HttpPost]
+        [Route("api/favorites/prune")]
+        public dynamic PruneFavorites()
+        {
+            if (User.Identity.IsAuthenticated == false)
+            {
+                return Unauthorized();
+            }
+            string member = User.Identity.Name;
+            FavoriteData data = favoriteService.Get(member);
+            List<string> missingAlbums = data.Albums.Where(id => mainService.GetFolderView(id) == null).ToList();
+            List<string> missingTracks = data.Tracks.Where(id => mainService.GetMusicFileView(id) == null).ToList();
+            int missing = missingAlbums.Count + missingTracks.Count;
+            if (missing == 0)
+            {
+                return new { ok = true, removed = 0, message = "沒有找不到的項目" };
+            }
+            if (missing == data.Albums.Count + data.Tracks.Count)
+            {
+                return new { ok = false, removed = 0, message = "你的最愛全部都找不到，可能是分享的磁碟沒連上，先不清除，請稍後再試" };
+            }
+            int removed = favoriteService.RemoveItems(member, missingAlbums, missingTracks);
+            logger.Info("{0} 清除找不到的最愛 {1} 筆", member, removed);
+            return new { ok = true, removed, message = "已清除 " + removed + " 筆找不到的項目" };
         }
 
         [Route("api/info")]
