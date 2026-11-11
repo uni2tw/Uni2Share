@@ -51,3 +51,5 @@ Ankh.NoLoad
 /WhatSearch/data/userData/news-read.json.tmp
 /WhatSearch/data/abnormal-requests.json
 /WhatSearch/data/abnormal-requests.json.tmp
+/WhatSearch/data/playback-stats.json
+/WhatSearch/data/playback-stats.json.tmp

@@ -60,6 +60,10 @@ namespace WhatSearch.Core
         [JsonPropertyName("abnormal")]
         public AbnormalRequestConfig Abnormal { get; set; } = new AbnormalRequestConfig();
 
+        /// <summary>播放監控的統計存檔設定（重新啟動後承接）；全部都有預設值，不寫也會啟用</summary>
+        [JsonPropertyName("monitor")]
+        public MonitorConfig Monitor { get; set; } = new MonitorConfig();
+
         //public HashSet
 
         public static SystemConfig Reload()
@@ -112,6 +116,10 @@ namespace WhatSearch.Core
             if (result.Abnormal == null)
             {
                 result.Abnormal = new AbnormalRequestConfig();
+            }
+            if (result.Monitor == null)
+            {
+                result.Monitor = new MonitorConfig();
             }
             if (result.Abnormal.IgnoreIps == null)
             {
@@ -301,6 +309,20 @@ namespace WhatSearch.Core
         /// </summary>
         [JsonPropertyName("trustedProxies")]
         public List<string> TrustedProxies { get; set; } = new List<string>();
+    }
+
+    /// <summary>
+    /// 播放監控的統計（近 7 天流量、播放次數、熱門資料夾、裝置分布）是否存到 data/playback-stats.json，讓重新啟動後承接。
+    /// 「現在誰在播」和即時速率不存。用強制結束行程（Stop-Process -Force）關站時不會觸發關閉補存，最多掉 flushSeconds 秒的資料
+    /// </summary>
+    public class MonitorConfig
+    {
+        /// <summary>false = 維持舊行為，只放記憶體、重新啟動歸零</summary>
+        [JsonPropertyName("persist")]
+        public bool Persist { get; set; } = true;
+        /// <summary>多久把有變動的統計寫檔一次（秒）；小於 5 以 5 計</summary>
+        [JsonPropertyName("flushSeconds")]
+        public int FlushSeconds { get; set; } = 30;
     }
 
     public class LoudnessConfig

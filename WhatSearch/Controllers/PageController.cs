@@ -2,6 +2,9 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading.Tasks;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 using WhatSearch.Core;
 using WhatSearch.Service;
 using WhatSearch.Models;
@@ -137,6 +140,42 @@ namespace WhatSearch.Controllers
         {
             Ioc.Get<IAbnormalRequestService>().Clear();
             return new { Success = 1, Message = "已清除記錄" };
+        }
+
+        /// <summary>
+        /// 優雅關閉站台（給佈版 bat 用 curl 呼叫）：要同時滿足 POST、直接從本機連進來（沒有代理轉發標頭）、帶管理者的登入 token（cookie WhatSearch_Auth）。
+        /// 不是本機一律回 404（不透露有這個端點），本機但不是管理者回 401／403，兩種都記 Warn。通過後先回 202，約 0.5 秒後才呼叫 StopApplication，
+        /// 讓回應能送完；之後走正常的關閉流程（ApplicationStopping，各服務補存），行程自己結束
+        /// </summary>
+        [HttpPost]
+        [Route("admin/shutdown")]
+        public IActionResult Shutdown()
+        {
+            NLog.ILogger log = NLog.LogManager.GetLogger("Shutdown");
+            string remote = HttpContext.Connection.RemoteIpAddress?.ToString();
+            if (ClientIpResolver.IsDirectLoopback(HttpContext) == false)
+            {
+                log.Warn("拒絕關閉站台的請求（不是直接從本機連進來），來源 {0}", remote);
+                return NotFound();
+            }
+            if (User.Identity == null || User.Identity.IsAuthenticated == false)
+            {
+                log.Warn("拒絕關閉站台的請求（沒有登入 token）");
+                return StatusCode(401, new { Success = 0, Message = "需要管理者登入" });
+            }
+            if (User.IsInRole("Admin") == false)
+            {
+                log.Warn("拒絕關閉站台的請求（{0} 不是管理者）", User.Identity.Name);
+                return StatusCode(403, new { Success = 0, Message = "需要管理者權限" });
+            }
+            log.Warn("管理者 {0} 要求關閉站台", User.Identity.Name);
+            IHostApplicationLifetime lifetime = HttpContext.RequestServices.GetRequiredService<IHostApplicationLifetime>();
+            Task.Run(async () =>
+            {
+                await Task.Delay(500);
+                lifetime.StopApplication();
+            });
+            return StatusCode(202, new { Success = 1, Message = "站台即將關閉" });
         }
 
         /// <summary>管理者新增會員：身分預設會員（直接啟用）；密碼由管理者設定並自己轉交對方，不會寫進日誌</summary>
