@@ -23,6 +23,8 @@ namespace WhatSearch.Services
         public bool Ready { get; set; }
         /// <summary>播放網址；還沒轉好時為 null</summary>
         public string Url { get; set; }
+        /// <summary>這首的長度（秒）；算不出來（最後一軌又讀不到音檔長度）時為 null</summary>
+        public double? Seconds { get; set; }
     }
 
     public class CueAlbumResult
@@ -200,7 +202,8 @@ namespace WhatSearch.Services
                     Title = t.Title,
                     Artist = (string.IsNullOrWhiteSpace(t.Performer) || string.Equals(t.Performer, albumArtist, StringComparison.Ordinal)) ? null : t.Performer,
                     Ready = ready,
-                    Url = ready ? "/api/cue/file/" + key + "/" + t.Number.ToString(CultureInfo.InvariantCulture) : null
+                    Url = ready ? "/api/cue/file/" + key + "/" + t.Number.ToString(CultureInfo.InvariantCulture) : null,
+                    Seconds = TrackSeconds(t)
                 });
             }
             result.ReadyCount = result.Tracks.Count(t => t.Ready);
@@ -259,6 +262,43 @@ namespace WhatSearch.Services
                 result.Ahead = jobs.Take(Math.Max(0, index)).Count(IsActive);
                 TouchCueDir(dir);
                 return result;
+            }
+        }
+
+        // 音檔的總長度（秒）快取：最後一軌的長度 = 音檔總長度 - 起點，CUE 裡沒有，要讀音檔的標頭；同一個檔案只讀一次
+        static readonly System.Collections.Concurrent.ConcurrentDictionary<string, double> audioSeconds =
+            new System.Collections.Concurrent.ConcurrentDictionary<string, double>();
+
+        static double? TrackSeconds(CuePlanTrack t)
+        {
+            if (t.Length.HasValue)
+            {
+                return t.Length.Value > 0 ? t.Length.Value : (double?)null;
+            }
+            try
+            {
+                string audio = t.Audio;
+                if (string.IsNullOrEmpty(audio) || File.Exists(audio) == false)
+                {
+                    return null;
+                }
+                FileInfo fi = new FileInfo(audio);
+                string k = audio + "|" + fi.Length.ToString(CultureInfo.InvariantCulture) + "|" + fi.LastWriteTimeUtc.Ticks.ToString(CultureInfo.InvariantCulture);
+                double total;
+                if (audioSeconds.TryGetValue(k, out total) == false)
+                {
+                    using (TagLib.File f = TagLib.File.Create(audio))
+                    {
+                        total = f.Properties.Duration.TotalSeconds;
+                    }
+                    audioSeconds[k] = total;
+                }
+                double len = total - t.Start;
+                return len > 0 ? len : (double?)null;
+            }
+            catch (Exception)
+            {
+                return null;
             }
         }
 
