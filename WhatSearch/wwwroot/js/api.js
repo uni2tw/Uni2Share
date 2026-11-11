@@ -91,6 +91,11 @@ api.setCover = function(id, url) {
     return axios.post('/api/coverset', { id: id, url: url });
 }
 
+// 會員點 CUE 或它的 FLAC：取得專輯曲目與即時拆軌進度（沒轉過會排進佇列）
+api.cueOpen = function(id) {
+    return axios.post('/api/cue/open', { id: id });
+}
+
 api.transcodeStatus = function(ids, first) {
     return axios.post('/api/transcode/status', { ids: ids, first: first || null });
 }

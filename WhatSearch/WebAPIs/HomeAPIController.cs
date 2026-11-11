@@ -360,6 +360,47 @@ namespace WhatSearch.WebAPIs
         }
 
         /// <summary>
+        /// 登入會員點 CUE 或它的 FLAC：回傳這張專輯的曲目與拆軌進度（沒轉過就排進佇列）。前端開著專輯視窗時每隔幾秒再呼叫一次取得最新進度。
+        /// </summary>
+        [HttpPost]
+        [Route("api/cue/open")]
+        [UserAuthorize]
+        public dynamic CueOpen([FromBody] CueOpenModel model)
+        {
+            // UserAuthorize 只擋 /get/ 開頭的網址，其他 API 要自己檢查登入
+            if (User.Identity.IsAuthenticated == false)
+            {
+                return Unauthorized();
+            }
+            string path = string.IsNullOrEmpty(model?.id) ? null : fimgr.GetPath(model.id);
+            string error;
+            CueAlbumResult album = Ioc.Get<IVideoConvertService>().OpenCueAlbum(path, User.Identity.Name, out error);
+            if (album == null)
+            {
+                return new { ok = false, message = error };
+            }
+            return new { ok = true, album };
+        }
+
+        /// <summary>拆軌暫存裡的單曲 MP3（支援 Range）</summary>
+        [HttpGet]
+        [Route("api/cue/file/{key}/{n:int}")]
+        [UserAuthorize]
+        public dynamic CueFile(string key, int n)
+        {
+            if (User.Identity.IsAuthenticated == false)
+            {
+                return Unauthorized();
+            }
+            string file = Ioc.Get<IVideoConvertService>().GetCueCacheFile(key, n);
+            if (file == null)
+            {
+                return NotFound();
+            }
+            return this.PhysicalFile(file, "audio/mpeg", true);
+        }
+
+        /// <summary>
         /// 查詢 FLAC 轉 MP3 的狀態（前端在有「轉檔中」的歌曲時每幾秒呼叫一次）；first 是使用者點了還沒轉好的那首，移到佇列最前面。
         /// </summary>
         [HttpPost]
@@ -939,6 +980,11 @@ namespace WhatSearch.WebAPIs
         {
             public string id { get; set; }
             public bool value { get; set; }
+        }
+
+        public class CueOpenModel
+        {
+            public string id { get; set; }
         }
 
         public class TranscodeStatusModel

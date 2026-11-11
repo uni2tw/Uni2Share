@@ -262,6 +262,15 @@ namespace WhatSearch.Core
         /// <summary>MKV 轉檔時 x264 最多用幾個執行緒（ffmpeg 的 -threads）；0 = 不限制（ffmpeg 自己決定，通常用滿所有核心）。想保留 CPU 給其它程式就設小一點，轉檔時間會跟著變長</summary>
         [JsonPropertyName("videoThreads")]
         public int VideoThreads { get; set; } = 0;
+        /// <summary>會員點 CUE／FLAC 時即時拆軌的暫存資料夾；留空用執行目錄下的 data\cuecache</summary>
+        [JsonPropertyName("cueCacheFolder")]
+        public string CueCacheFolder { get; set; }
+        /// <summary>拆軌暫存的容量上限（GB），超過就從最久沒被開過的專輯開始刪</summary>
+        [JsonPropertyName("cueCacheGB")]
+        public double CueCacheGB { get; set; } = 2;
+        /// <summary>拆軌暫存幾天沒被開過就刪</summary>
+        [JsonPropertyName("cueCacheDays")]
+        public int CueCacheDays { get; set; } = 30;
     }
 
     /// <summary>
