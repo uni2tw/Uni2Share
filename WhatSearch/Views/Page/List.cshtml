@@ -469,7 +469,7 @@
         <div style="flex:1 1 0; display:flex; min-width:0">
             <span class="navbar-brand mb-0 h1 d-none d-sm-inline-block" style="flex:0 0 auto">Uni2Share</span>
             <div v-if="breadcrumbIsVisible" style="flex-grow:1; display:flex; min-width:0">
-                <breadcrumbs-component :items="displayBreadcrumbs" :current-last="(!videoGridVisible && !musicGridVisible) || cueViewVisible"
+                <breadcrumbs-component :items="displayBreadcrumbs" :current-last="!videoGridVisible && !musicGridVisible"
                     v-on:select-breadcrumb="vm_selectBreadcrumb"></breadcrumbs-component>
             </div>
             <template id="search-component" v-if="searchIsVisible">
@@ -1506,12 +1506,11 @@
                 // 追番畫面已把資料夾名稱當標題顯示，麵包屑不重複顯示最後一層
                 displayBreadcrumbs: function() {
                     if (this.cueViewVisible && this.breadcrumbs.length > 0) {
-                        // CUE 專輯畫面：保留資料夾這一層（點了回到檔案列表），後面再加一層專輯名稱
+                        // CUE 專輯畫面：保留資料夾這一層（最後一層，點了回到檔案列表）
                         let list = this.breadcrumbs.slice();
                         if (this.currentRating) {
                             list[list.length - 1] = Object.assign({}, list[list.length - 1], { text: this.currentRating.name });
                         }
-                        list.push({ id: null, text: (this.musicFolder && this.musicFolder.title) || 'CUE 專輯' });
                         return list;
                     }
                     if ((this.videoGridVisible || this.musicGridVisible) && this.breadcrumbs.length > 1) {
