@@ -672,6 +672,13 @@
                 :class="activeFilter === opt.type ? 'btn-success' : 'btn-outline-success'"
                 v-on:click.stop="setFilter(opt.type)">{{ opt.label }}</button>
         </div>
+        <div v-if="cueAlbum && !cueAlbum.data" style="padding:8px 5px 0; font-size:14px;">
+            <div v-if="cueAlbum.phase === 'loading'" style="color:#888;"><i class="fa fa-spinner fa-spin"></i> 讀取 CUE 專輯中…</div>
+            <div v-else style="color:#dc3545; display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+                <span>{{ cueAlbum.error }}</span>
+                <button type="button" class="btn btn-sm btn-outline-secondary" v-on:click="vm_cueAlbumClose()">知道了</button>
+            </div>
+        </div>
         <div v-if="musicGridVisible" style="padding:10px 5px 0;">
             <div style="display:flex; gap:14px; align-items:flex-start;">
                 <div v-if="videoCoverUrl || canEditCover" class="cover-wrap" style="flex:0 0 auto; width:130px; position:relative;">
@@ -690,14 +697,14 @@
                         <button type="button" class="btn btn-success" v-on:click="vm_albumPlayClick()">
                             <i class="fa" :class="albumPlayState === 'pause' ? 'fa-pause' : 'fa-play'"></i> {{ albumPlayState === 'pause' ? '暫停' : (albumPlayState === 'resume' ? '繼放' : '播放') }}
                         </button>
-                        <button v-if="isLoggedIn && currentFolderId" type="button" class="btn btn-sm"
+                        <button v-if="isLoggedIn && currentFolderId && !cueAlbum" type="button" class="btn btn-sm"
                             :class="favAlbumMap[currentFolderId] ? 'btn-danger' : 'btn-outline-danger'"
                             title="收藏這張專輯"
                             v-on:click="vm_toggleFav('album', currentFolderId)">
                             <i :class="favAlbumMap[currentFolderId] ? 'fa-solid fa-heart' : 'fa-regular fa-heart'"></i>
                             {{ favAlbumMap[currentFolderId] ? '已收藏' : '收藏' }}
                         </button>
-                        <button v-if="isLoggedIn && currentFolderId" type="button" class="btn btn-sm"
+                        <button v-if="isLoggedIn && currentFolderId && !cueAlbum" type="button" class="btn btn-sm"
                             :class="pinMap[currentFolderId] ? 'btn-primary' : 'btn-outline-primary'"
                             :title="pinMap[currentFolderId] ? '取消置頂這張專輯' : '在上一層置頂這張專輯'"
                             v-on:click="vm_togglePin(currentFolderId)">
@@ -706,6 +713,23 @@
                         <button type="button" class="btn btn-sm btn-outline-secondary" title="切換列表檢視" v-on:click="showListView = true">
                             <i class="fa fa-list"></i> 列表
                         </button>
+                    </div>
+                    <div v-if="cueAlbum && cueAlbum.data" style="margin-top:10px; font-size:13px;">
+                        <template v-if="cueAlbum.data.state === 'failed'">
+                            <div style="color:#dc3545;">轉換失敗：{{ cueAlbum.data.message }}</div>
+                        </template>
+                        <template v-else-if="cueAlbum.data.state === 'ready'">
+                            <div style="color:#198754;"><i class="fa fa-check"></i> 全部 {{ cueAlbum.data.total }} 首都轉好了</div>
+                        </template>
+                        <template v-else>
+                            <div class="progress" style="height:8px; margin-bottom:4px; max-width:360px;">
+                                <div class="progress-bar" :style="{width: (cueAlbum.data.total ? cueAlbum.data.readyCount * 100 / cueAlbum.data.total : 0) + '%'}"></div>
+                            </div>
+                            <div v-if="cueAlbum.data.state === 'queued'" style="color:#b26a00;"><i class="fa fa-spinner fa-spin"></i> <template v-if="cueAlbum.data.ahead > 0">排隊中，前面還有 {{ cueAlbum.data.ahead }} 個轉換工作；輪到後轉好一首就能先播一首</template><template v-else>即將開始轉換；轉好一首就能先播一首</template></div>
+                            <div v-else style="color:#198754;"><i class="fa fa-spinner fa-spin"></i> 轉換中 {{ cueAlbum.data.readyCount }} / {{ cueAlbum.data.total }} 首，轉好的就能先播</div>
+                        </template>
+                        <div v-if="cueNote" style="color:#b26a00; margin-top:4px;">{{ cueNote }}</div>
+                        <div style="font-size:12px; color:#999; margin-top:6px;">這是伺服器即時拆出來的暫存 MP3，不會寫進分享資料夾，太久沒開會自動清掉。暫存的歌曲沒有評分、最愛與音量平衡。</div>
                     </div>
                 </div>
             </div>
@@ -732,10 +756,10 @@
             <label :style="{cursor: autoNext ? 'pointer' : 'not-allowed', userSelect: 'none', opacity: autoNext ? 1 : 0.5}">
                 <input type="checkbox" v-model="autoLoop" :disabled="!autoNext" /> 播完重頭開始
             </label>
-            <label v-if="transcodeEnabled && hasTranscode" style="cursor:pointer; user-select:none;" title="FLAC 預設播放伺服器轉好的 MP3（192 kbps，省頻寬）；勾選後改播原始 FLAC（無損，檔案大）">
+            <label v-if="transcodeEnabled && hasTranscode && !cueViewVisible" style="cursor:pointer; user-select:none;" title="FLAC 預設播放伺服器轉好的 MP3（192 kbps，省頻寬）；勾選後改播原始 FLAC（無損，檔案大）">
                 <input type="checkbox" v-model="flacOriginal" /> FLAC 播原檔
             </label>
-            <span v-if="transcodeEnabled && hasTranscode && transcodePendingCount > 0" class="tc-badge tc-pending"><i class="fa fa-spinner fa-spin"></i> MP3 轉檔中 {{ transcodePendingCount }} 首</span>
+            <span v-if="transcodeEnabled && hasTranscode && !cueViewVisible && transcodePendingCount > 0" class="tc-badge tc-pending"><i class="fa fa-spinner fa-spin"></i> MP3 轉檔中 {{ transcodePendingCount }} 首</span>
             <span v-if="transcodeNote" style="color:#b26a00;">{{ transcodeNote }}</span>
         </div>
         <div v-if="musicGridVisible">
@@ -753,7 +777,7 @@
                         <div v-if="t.item.transcode_state && t.item.transcode_state !== 'ready'" class="tc-badge" :class="'tc-' + t.item.transcode_state"><i v-if="t.item.transcode_state === 'pending'" class="fa fa-spinner fa-spin"></i> {{ vm_transcodeText(t.item) }}</div>
                     </div>
                     <div class="track-dur">{{ t.item.duration ? formatDuration(t.item.duration) : '' }}</div>
-                    <div v-if="isLoggedIn" class="fav-btn" :class="{'fav-on': favTrackMap[t.item.id]}" title="加入最愛"
+                    <div v-if="isLoggedIn && !t.item.cueTrack" class="fav-btn" :class="{'fav-on': favTrackMap[t.item.id]}" title="加入最愛"
                         v-on:click.stop="vm_toggleFav('track', t.item.id)">
                         <i :class="favTrackMap[t.item.id] ? 'fa-solid fa-heart' : 'fa-regular fa-heart'"></i>
                     </div>
@@ -1009,57 +1033,6 @@
         </div>
     </div>
 
-    <div class="lightbox-overlay" v-if="cueAlbum">
-        <div class="lightbox-overlay-content" style="background:#fff; color:#222; border-radius:8px; padding:14px 16px; width:min(460px, 94vw); max-height:92%; overflow:auto;">
-            <div style="display:flex; justify-content:space-between; align-items:center; position:sticky; top:-14px; z-index:2; background:#fff; margin:-14px 0 0; padding:14px 0 8px;">
-                <div style="font-weight:bold;">CUE 專輯</div>
-                <button type="button" class="btn btn-sm btn-outline-secondary" v-on:click="vm_cueAlbumClose()"><i class="fa fa-times"></i></button>
-            </div>
-            <div style="font-size:13px; color:#888; word-break:break-all; margin-bottom:6px;">{{ cueAlbum.name }}</div>
-            <div v-if="cueAlbum.phase === 'loading'" style="padding:14px 0; color:#888;"><i class="fa fa-spinner fa-spin"></i> 讀取 CUE 中…</div>
-            <div v-else-if="cueAlbum.phase === 'error'" style="margin-bottom:12px; color:#dc3545;">{{ cueAlbum.error }}</div>
-            <div v-else-if="cueAlbum.data">
-                <div style="font-size:14px; line-height:1.6; margin-bottom:8px;">
-                    <div><b>{{ cueAlbum.data.album }}</b></div>
-                    <div v-if="cueAlbum.data.artist || cueAlbum.data.year" style="color:#666; font-size:13px;">{{ cueAlbum.data.artist }}<span v-if="cueAlbum.data.artist && cueAlbum.data.year"> · </span>{{ cueAlbum.data.year }}</div>
-                </div>
-                <div style="margin-bottom:10px; font-size:13px;">
-                    <template v-if="cueAlbum.data.state === 'failed'">
-                        <div style="color:#dc3545;">轉換失敗：{{ cueAlbum.data.message }}</div>
-                    </template>
-                    <template v-else-if="cueAlbum.data.state === 'ready'">
-                        <div style="color:#198754;"><i class="fa fa-check"></i> 全部 {{ cueAlbum.data.total }} 首都轉好了</div>
-                    </template>
-                    <template v-else>
-                        <div class="progress" style="height:8px; margin-bottom:4px;">
-                            <div class="progress-bar" :style="{width: (cueAlbum.data.total ? cueAlbum.data.readyCount * 100 / cueAlbum.data.total : 0) + '%'}"></div>
-                        </div>
-                        <div v-if="cueAlbum.data.state === 'queued'" style="color:#b26a00;"><i class="fa fa-spinner fa-spin"></i> <template v-if="cueAlbum.data.ahead > 0">排隊中，前面還有 {{ cueAlbum.data.ahead }} 個轉換工作；輪到後轉好一首就能先播一首</template><template v-else>即將開始轉換；轉好一首就能先播一首</template></div>
-                        <div v-else style="color:#198754;"><i class="fa fa-spinner fa-spin"></i> 轉換中 {{ cueAlbum.data.readyCount }} / {{ cueAlbum.data.total }} 首，轉好的就能先播</div>
-                    </template>
-                </div>
-                <div style="border:1px solid #ddd; border-radius:4px; font-size:14px; margin-bottom:10px;">
-                    <div v-for="t in cueAlbum.data.tracks" :key="t.number" v-on:click="vm_cueAlbumPlay(t)"
-                        style="display:flex; align-items:center; gap:8px; padding:7px 10px; border-bottom:1px solid #eee;"
-                        :style="{cursor: t.ready ? 'pointer' : 'default', color: t.ready ? '#222' : '#aaa', background: nowPlaying.id === vm_cueTrackId(t) ? '#e7f1ff' : ''}">
-                        <span style="width:22px; text-align:right; color:#999; flex:none;">{{ t.number }}</span>
-                        <span style="flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">{{ t.title }}<span v-if="t.artist" style="color:#999; font-size:12px;"> · {{ t.artist }}</span></span>
-                        <span style="flex:none; width:18px; text-align:center;">
-                            <i v-if="nowPlaying.id === vm_cueTrackId(t) && !nowPlaying.paused" class="fa fa-volume-up" style="color:#0d6efd;"></i>
-                            <i v-else-if="t.ready" class="fa fa-play" style="color:#0d6efd; font-size:12px;"></i>
-                            <i v-else-if="cueAlbum.data.state === 'failed'" class="fa fa-minus" style="color:#ccc;"></i>
-                            <i v-else class="fa fa-hourglass-half" style="color:#ccc; font-size:12px;"></i>
-                        </span>
-                    </div>
-                </div>
-                <div style="font-size:12px; color:#999; margin-bottom:10px;">這是伺服器即時拆出來的暫存 MP3，不會寫進分享資料夾，太久沒開會自動清掉。暫存的歌曲沒有評分、最愛與音量平衡。</div>
-            </div>
-            <div style="display:flex; gap:8px; justify-content:flex-end;">
-                <button type="button" class="btn btn-outline-secondary" v-on:click="vm_cueAlbumClose()">關閉</button>
-            </div>
-        </div>
-    </div>
-
     <div class="lightbox-overlay" v-if="tierPreview">
         <div class="lightbox-overlay-content" style="background:#fff; color:#222; border-radius:8px; padding:12px 14px; max-height:94%; overflow:auto;">
             <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; position:sticky; top:-12px; z-index:2; background:#fff; margin:-12px 0 0; padding:12px 0 8px;">
@@ -1256,6 +1229,11 @@
                     cueAlbum: null,
                     cueAlbumTimer: 0,
                     playQueueCueKey: '',
+                    // CUE 專輯畫面的曲目（每首一個物件，跟播放佇列共用同一批，播放中旗標才會一起更新）、提示文字、播放中那張專輯所在的資料夾
+                    cueTracks: [],
+                    cueNote: '',
+                    cueNoteTimer: 0,
+                    cuePlayFolderId: '',
                     tierBusy: false,
                     tierProgress: '',
                     tierPreview: null,
@@ -1561,6 +1539,9 @@
                 },
                 // 要顯示封面的影片：追番畫面取第 1 集，單部影片取它自己
                 coverVideoItem: function() {
+                    if (this.cueAlbum && this.cueAlbum.data) {
+                        return null;
+                    }
                     if (this.videoFolder) {
                         return this.videoFolder.episodes[0].item;
                     }
@@ -1573,7 +1554,29 @@
                 //  1) 沒有子資料夾、沒有影片、音樂 >= 3 首；
                 //  2) 多片裝：母資料夾只有光碟子資料夾，伺服器已把各光碟的歌曲放在 discGroups，合計 >= 3 首。
                 // 搜尋等跨資料夾清單不算
+                // 目前是不是顯示著 CUE 專輯畫面（切到「列表」檢視就不算）
+                cueViewVisible: function() {
+                    return !!(this.cueAlbum && this.cueAlbum.data) && this.cueTracks.length > 0 && !this.showListView;
+                },
                 musicFolder: function() {
+                    // CUE 專輯：用伺服器即時拆軌的曲目組成同一個專輯版面
+                    if (this.cueAlbum && this.cueAlbum.data && this.cueTracks.length > 0) {
+                        let a = this.cueAlbum.data;
+                        let lastCrumb = this.breadcrumbs.length ? this.breadcrumbs[this.breadcrumbs.length - 1] : null;
+                        let known = this.cueTracks.every(t => t.duration > 0);
+                        let seconds = 0;
+                        this.cueTracks.forEach(t => { seconds += t.duration || 0; });
+                        let tracks = this.cueTracks.map(t => ({ item: t, no: t.track, title: t.track_title, artist: t.cueArtist || '' }));
+                        return {
+                            title: a.album || (lastCrumb && lastCrumb.text) || '',
+                            artist: a.artist || '',
+                            year: a.year || '',
+                            folderName: lastCrumb && lastCrumb.text ? lastCrumb.text : '',
+                            totalSeconds: known ? seconds : 0,
+                            groups: [{ title: '', seconds: known ? seconds : 0, tracks: tracks }],
+                            tracks: tracks
+                        };
+                    }
                     let all = this.allItems;
                     if (all.length === 0 || all.some(t => t.path || t.type === 'video')) {
                         return null;
@@ -2105,6 +2108,9 @@
                     return btoa(unescape(encodeURIComponent(path))).replace(/=+$/, '').replace(/\+/g, '-').replace(/\//g, '_');
                 },
                 vm_playingFolderPath: function () {
+                    if (String(this.nowPlaying.id).indexOf('cue:') === 0) {
+                        return this.cuePlayFolderId ? this.vm_idToPath(this.cuePlayFolderId) : '';
+                    }
                     let p = this.vm_idToPath(this.nowPlaying.id);
                     let i = p.lastIndexOf('/');
                     return i > 0 ? p.substring(0, i) : '';
@@ -3008,6 +3014,7 @@
                     };
                 },
                 vm_getFolder: function (folder, pushState, revealPlaying) {
+                    this.vm_cueAlbumClose();
                     this.loading = true;
                     return api.folder(folder).then((res) => {
                         var data = res.data;
@@ -3071,6 +3078,10 @@
                         if (this.isLoggedIn === false) {
                             console.log('not logged in, redirect to login');
                             this.redirectToLogin(item.id);
+                            return;
+                        }
+                        if (item.cueTrack) {
+                            this.vm_cueTrackClick(item);
                             return;
                         }
                         if (this.vm_cueAlbumTrigger(item)) {
@@ -3139,13 +3150,12 @@
                         return !!pm && pm[1].toLowerCase() === base && partnerExts.indexOf(pm[2].toLowerCase()) !== -1;
                     });
                 },
-                vm_cueTrackId: function (t) {
-                    return 'cue:' + (this.cueAlbum && this.cueAlbum.data ? this.cueAlbum.data.key : '') + ':' + t.number;
-                },
                 vm_cueAlbumOpen: function (item) {
                     this.vm_cueAlbumStopPoll();
                     this.setSelectedItem(item.id);
-                    this.cueAlbum = { phase: 'loading', id: item.id, name: item.title, data: null, error: '' };
+                    this.showListView = false;
+                    this.cueNote = '';
+                    this.cueAlbum = { phase: 'loading', id: item.id, name: item.title, data: null, error: '', coverStarted: false, coverUrlSet: false };
                     this.vm_cueAlbumFetch(item.id);
                 },
                 vm_cueAlbumFetch: function (id) {
@@ -3161,13 +3171,18 @@
                         let a = d.album;
                         if (a.redirectFolderId) {
                             // 管理者已經把它拆在分享資料夾了，直接進那個資料夾
-                            this.cueAlbum = null;
+                            this.vm_cueAlbumClose();
                             this.vm_getFolder(a.redirectFolderId, true);
                             return;
                         }
+                        this.vm_cueAlbumApply(a);
                         dlg.phase = 'show';
                         dlg.data = a;
                         this.vm_cueAlbumSyncQueue(a);
+                        if (dlg.coverStarted === false) {
+                            dlg.coverStarted = true;
+                            this.vm_cueAlbumCover(dlg);
+                        }
                         if (a.state === 'queued' || a.state === 'running') {
                             this.cueAlbumTimer = window.setTimeout(() => {
                                 this.cueAlbumTimer = 0;
@@ -3178,8 +3193,13 @@
                         let dlg = this.cueAlbum;
                         if (!dlg || dlg.id !== id) { return; }
                         if (err && err.response && err.response.status === 401) {
-                            this.cueAlbum = null;
+                            this.vm_cueAlbumClose();
                             this.redirectToLogin(id);
+                            return;
+                        }
+                        if (dlg.data) {
+                            // 已經有畫面了，只是更新進度失敗：留著現有的畫面，提示一下
+                            this.vm_cueNote('更新轉換進度失敗，重新點一次 CUE／FLAC 可以再試');
                             return;
                         }
                         dlg.phase = 'error';
@@ -3192,48 +3212,109 @@
                         this.cueAlbumTimer = 0;
                     }
                 },
+                // 收掉 CUE 專輯畫面（換資料夾、讀取失敗按「知道了」）；正在播的音樂不受影響
                 vm_cueAlbumClose: function () {
                     this.vm_cueAlbumStopPoll();
-                    this.cueAlbum = null;
-                },
-                // 已經轉好的曲目組成播放佇列（轉好是依曲號順序，所以永遠是從第 1 首起連續的一段）
-                vm_cueAlbumItems: function (a) {
-                    return a.tracks.filter(t => t.ready).map(t => ({
-                        id: 'cue:' + a.key + ':' + t.number,
-                        get_url: t.url,
-                        title: t.title,
-                        track_title: t.title,
-                        type: 'music',
-                        artist: t.artist || a.artist || '',
-                        album: a.album || '',
-                        track: t.number,
-                        playing: false
-                    }));
-                },
-                vm_cueAlbumPlay: function (t) {
-                    if (!t.ready || !this.cueAlbum || !this.cueAlbum.data) {
+                    let dlg = this.cueAlbum;
+                    if (!dlg) {
                         return;
                     }
-                    let a = this.cueAlbum.data;
-                    let items = this.vm_cueAlbumItems(a);
-                    let id = this.vm_cueTrackId(t);
-                    let idx = items.findIndex(x => x.id === id);
+                    this.cueAlbum = null;
+                    this.cueNote = '';
+                    this.showListView = false;
+                    if (dlg.coverUrlSet) {
+                        this.videoCoverUrl = '';
+                    }
+                },
+                // 把伺服器回報的曲目更新到 cueTracks（同一首沿用同一個物件，播放中旗標與畫面才不會斷）
+                vm_cueAlbumApply: function (a) {
+                    let old = {};
+                    this.cueTracks.forEach(x => { old[x.id] = x; });
+                    let curId = this.nowPlaying.id;
+                    this.cueTracks = a.tracks.map(t => {
+                        let id = 'cue:' + a.key + ':' + t.number;
+                        let it = old[id];
+                        if (!it) {
+                            it = { id: id, type: 'music', cueTrack: true, track: t.number, selected: false, playing: id === curId };
+                        }
+                        it.get_url = t.url || '';
+                        it.title = t.title;
+                        it.track_title = t.title;
+                        it.cueArtist = t.artist || '';
+                        it.artist = t.artist || a.artist || '';
+                        it.album = a.album || '';
+                        it.duration = t.seconds || 0;
+                        it.transcode_state = t.ready ? 'ready' : (a.state === 'failed' ? 'failed' : 'pending');
+                        return it;
+                    });
+                },
+                // 封面：資料夾裡的 cover.jpg 之類；沒有就試同名音檔的內嵌封面
+                vm_cueAlbumCover: function (dlg) {
+                    let url = this.vm_findCoverUrl([]);
+                    if (url) {
+                        this.videoCoverUrl = url;
+                        dlg.coverUrlSet = true;
+                        return;
+                    }
+                    let m = /^(.*)\.([^.\/]+)$/.exec(dlg.name || '');
+                    if (!m) {
+                        return;
+                    }
+                    let base = m[1].toLowerCase();
+                    let audioExts = ['flac', 'wav', 'wv', 'ape', 'tta', 'm4a'];
+                    let audio = this.allItems.find(t => {
+                        let pm = /^(.*)\.([^.\/]+)$/.exec(t.title || '');
+                        return t.type !== 'folder' && !!pm && pm[1].toLowerCase() === base && audioExts.indexOf(pm[2].toLowerCase()) !== -1;
+                    });
+                    if (!audio || !audio.get_url || this.isLoggedIn === false) {
+                        return;
+                    }
+                    this.vm_loadCover(this.vm_coverApiUrl(audio)).then(dataUrl => {
+                        if (this.cueAlbum === dlg && dataUrl) {
+                            this.videoCoverUrl = dataUrl;
+                            dlg.coverUrlSet = true;
+                        }
+                    }).catch(() => { });
+                },
+                vm_cueNote: function (text) {
+                    this.cueNote = text;
+                    if (this.cueNoteTimer) {
+                        window.clearTimeout(this.cueNoteTimer);
+                    }
+                    this.cueNoteTimer = window.setTimeout(() => {
+                        this.cueNote = '';
+                        this.cueNoteTimer = 0;
+                    }, 6000);
+                },
+                // 已經轉好的曲目組成播放佇列（轉好是依曲號順序，所以永遠是從第 1 首起連續的一段）
+                vm_cueAlbumItems: function () {
+                    return this.cueTracks.filter(t => t.transcode_state === 'ready');
+                },
+                // 點 CUE 專輯畫面裡的一首：還沒轉好就提示，轉好的就播（佇列是目前轉好的那一段）
+                vm_cueTrackClick: function (item) {
+                    if (item.transcode_state !== 'ready') {
+                        this.vm_cueNote('「' + item.track_title + '」' + (item.transcode_state === 'failed' ? '轉換失敗，沒辦法播放' : '還在轉換，轉好就能播放'));
+                        return;
+                    }
+                    let items = this.vm_cueAlbumItems();
+                    let idx = items.findIndex(x => x.id === item.id);
                     if (idx === -1) {
                         return;
                     }
-                    this.playQueueCueKey = a.key;
+                    this.playQueueCueKey = (this.cueAlbum && this.cueAlbum.data) ? this.cueAlbum.data.key : '';
+                    this.cuePlayFolderId = this.currentFolderId || '';
                     this.playQueue = items;
                     this.playQueueIndex = idx;
                     this.playQueueGain = false;
-                    this.playCoverUrl = '';
-                    this.vm_playMusic(items[idx].get_url, items[idx].id);
+                    this.playCoverUrl = this.videoCoverUrl || '';
+                    this.vm_playMusic(item.get_url, item.id);
                 },
                 // 還在轉的時候，後來轉好的曲目也加進正在播的佇列，才接得下去
                 vm_cueAlbumSyncQueue: function (a) {
                     if (!a.key || this.playQueueCueKey !== a.key) {
                         return;
                     }
-                    let items = this.vm_cueAlbumItems(a);
+                    let items = this.vm_cueAlbumItems();
                     let cur = this.nowPlaying.id;
                     items.forEach(x => { x.playing = (x.id === cur); });
                     this.playQueue = items;
@@ -4031,6 +4112,9 @@
                 },
                 // ----- FLAC 轉 MP3 -----
                 vm_transcodeText: function (item) {
+                    if (item.cueTrack) {
+                        return item.transcode_state === 'failed' ? '轉換失敗' : '轉換中…完成後即可播放';
+                    }
                     if (item.transcode_state === 'pending') {
                         return this.flacOriginal ? 'MP3 轉檔中…（目前播原檔）' : 'MP3 轉檔中…完成後即可播放';
                     }
@@ -4044,6 +4128,9 @@
                 },
                 // 決定實際要播的網址：FLAC 轉好了播 MP3；還沒轉好回傳 null（不播，提示等待）；選了「播原檔」、轉檔失敗或不是 FLAC 就播原網址
                 vm_resolveAudioUrl: function (item, url) {
+                    if (item && item.cueTrack) {
+                        return url;
+                    }
                     if (!this.transcodeEnabled || !item || !item.transcode_state || this.flacOriginal) {
                         return url;
                     }
