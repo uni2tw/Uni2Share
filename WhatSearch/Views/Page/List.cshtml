@@ -1488,7 +1488,8 @@
                     return info.file + '：影片 ' + v + ' · 音訊 ' + a;
                 },
                 hasMusicItems: function() {
-                    return this.items.some(t => t.type === 'music') || this.musicGridVisible;
+                    // 點了會開「CUE 專輯」視窗的 CUE／FLAC 只是專輯入口，不算一般音樂（視窗裡固定接播，這些選項用不到）
+                    return this.items.some(t => t.type === 'music' && !this.vm_cueAlbumTrigger(t)) || this.musicGridVisible;
                 },
                 // 資料夾內沒有子資料夾/音樂、影片 >= 2 部（搜尋等跨資料夾清單不算）時，視為影片資料夾
                 videoFolder: function() {
