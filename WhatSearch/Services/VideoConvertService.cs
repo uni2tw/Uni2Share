@@ -59,7 +59,10 @@ namespace WhatSearch.Services
     public class CuePlan
     {
         public string Cue { get; set; }
+        /// <summary>專輯名稱（去掉結尾的 (Disc N)，寫進 MP3 標籤用，多片裝才會歸成同一張專輯）</summary>
         public string Album { get; set; }
+        /// <summary>CUE 的 TITLE 原文（含 (Disc N)）；畫面上顯示這個，沒有 TITLE 時退回 Album</summary>
+        public string Title { get; set; }
         public string Artist { get; set; }
         public string Year { get; set; }
         public string Genre { get; set; }
@@ -563,6 +566,7 @@ namespace WhatSearch.Services
             {
                 Cue = cue.Name,
                 Album = album,
+                Title = string.IsNullOrWhiteSpace(sheet.Title) ? album : sheet.Title.Trim(),
                 Artist = sheet.Performer,
                 Year = year,
                 Genre = sheet.Genre,
