@@ -191,7 +191,7 @@
                         <tr v-for="job in jobs" :key="job.id">
                             <td style="white-space:nowrap;"><span class="badge" :class="vm_stateClass(job.state)">{{ vm_stateText(job.state) }}</span></td>
                             <td style="min-width:220px;">
-                                <div style="word-break:break-all;"><span v-if="job.kind === 'cue'" class="badge bg-info text-dark" style="margin-right:4px;">CUE 拆軌</span>{{ job.name }}</div>
+                                <div style="word-break:break-all;"><span v-if="job.kind === 'cue'" class="badge bg-info text-dark" style="margin-right:4px;">CUE 拆軌</span><span v-if="job.kind === 'cuecache'" class="badge bg-secondary" style="margin-right:4px;" :title="'會員 ' + job.by + ' 點開的專輯，拆到暫存'">CUE 暫存</span>{{ job.name }}</div>
                                 <div style="font-size:12px; color:#888;">{{ job.folder }}</div>
                                 <div v-if="job.state === 'running'" class="progress" style="height:8px; margin-top:4px;">
                                     <div class="progress-bar" role="progressbar" :style="{width: job.progress + '%'}"></div>

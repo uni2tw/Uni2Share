@@ -32,6 +32,14 @@ namespace WhatSearch.Services
         CuePlan PreviewCue(string cuePath, out string error);
         /// <summary>把一個 CUE 檔排進佇列：依曲目切出 MP3，放到 CUE 旁邊的 Disc N 資料夾；不合格回傳 null 並說明原因</summary>
         ConvertJob EnqueueCue(string cuePath, string by, out string error);
+        /// <summary>
+        /// 登入會員點 CUE 或它的 FLAC：回傳這張專輯的曲目與轉換進度。曲目拆成 MP3 放進暫存（不動分享資料夾），轉好一首就能播一首；
+        /// 還沒轉就排進佇列（同一時間只轉一個工作，每位會員最多一張、等待中的總數有上限）。分享資料夾裡已經有拆好的 Disc 資料夾時，回傳那個資料夾的 id 讓前端直接進去。
+        /// path 可以是 CUE 檔或同一個資料夾裡的音檔；沒有成對的 CUE 與音檔回傳 null 並說明原因
+        /// </summary>
+        CueAlbumResult OpenCueAlbum(string path, string by, out string error);
+        /// <summary>拆軌暫存裡某一軌的 MP3 路徑（順便更新使用時間）；不存在回傳 null</summary>
+        string GetCueCacheFile(string key, int number);
     }
 
     public class CuePlanTrack
@@ -100,6 +108,8 @@ namespace WhatSearch.Services
         public const string StateCanceled = "canceled";
         public const string KindMkv = "mkv";
         public const string KindCue = "cue";
+        /// <summary>會員點 CUE／FLAC 觸發的拆軌，輸出放拆軌暫存而不是分享資料夾</summary>
+        public const string KindCueCache = "cuecache";
 
         public string Id { get; set; }
         public string FileId { get; set; }
@@ -118,6 +128,8 @@ namespace WhatSearch.Services
 
         internal string FullPath;
         internal string FolderKey;
+        internal string CacheDir;
+        internal string CacheKey;
         internal volatile bool CancelRequested;
     }
 
@@ -127,7 +139,7 @@ namespace WhatSearch.Services
     /// 檔名不變，所以評分、網址、書籤都不受影響；新檔的修改時間沿用原檔，不會被當成新上架。任何一步失敗都保留原檔。
     /// 一次只轉一個（單一背景執行緒）；佇列只放在記憶體，重新啟動後要再按一次。
     /// </summary>
-    public class VideoConvertService : IVideoConvertService
+    public partial class VideoConvertService : IVideoConvertService
     {
         static ILogger logger = LogManager.GetCurrentClassLogger();
         const int MaxFinishedJobs = 50;
@@ -433,7 +445,7 @@ namespace WhatSearch.Services
                 string error = null;
                 try
                 {
-                    error = job.Kind == ConvertJob.KindCue ? SplitCue(job) : Convert(job);
+                    error = (job.Kind == ConvertJob.KindCue || job.Kind == ConvertJob.KindCueCache) ? SplitCue(job) : Convert(job);
                 }
                 catch (Exception ex)
                 {
@@ -458,6 +470,10 @@ namespace WhatSearch.Services
                         job.State = ConvertJob.StateDone;
                         job.Progress = 100;
                     }
+                }
+                if (job.Kind == ConvertJob.KindCueCache)
+                {
+                    TrimCueCache();
                 }
             }
         }
@@ -670,7 +686,9 @@ namespace WhatSearch.Services
             {
                 return error;
             }
-            Directory.CreateDirectory(plan.OutputDir);
+            bool toCache = job.Kind == ConvertJob.KindCueCache;
+            string outDir = toCache ? job.CacheDir : plan.OutputDir;
+            Directory.CreateDirectory(outDir);
             Stopwatch watch = Stopwatch.StartNew();
             int made = 0, skipped = 0, n = plan.Tracks.Count;
             for (int i = 0; i < n; i++)
@@ -680,7 +698,7 @@ namespace WhatSearch.Services
                     return null;
                 }
                 CuePlanTrack t = plan.Tracks[i];
-                string output = Path.Combine(plan.OutputDir, t.FileName);
+                string output = Path.Combine(outDir, toCache ? CueCacheTrackName(t.Number) : t.FileName);
                 job.Progress = Math.Min(99, i * 100 / n);
                 if (File.Exists(output))
                 {
@@ -712,7 +730,9 @@ namespace WhatSearch.Services
                     try { if (File.Exists(tmp)) { File.Delete(tmp); } } catch { }
                 }
             }
-            job.Message = string.Format("拆出 {0} 首到「{1}」{2}", made, plan.Folder, skipped > 0 ? "（略過 " + skipped + " 首已存在）" : string.Empty);
+            job.Message = toCache
+                ? string.Format("拆出 {0} 首到暫存{1}", made, skipped > 0 ? "（略過 " + skipped + " 首已存在）" : string.Empty)
+                : string.Format("拆出 {0} 首到「{1}」{2}", made, plan.Folder, skipped > 0 ? "（略過 " + skipped + " 首已存在）" : string.Empty);
             logger.Info("CUE 拆軌完成 {0}：{1}，耗時 {2:F1} 分鐘", job.FullPath, job.Message, watch.Elapsed.TotalMinutes);
             return null;
         }
