@@ -469,8 +469,8 @@
         <div style="flex:1 1 0; display:flex; min-width:0">
             <span class="navbar-brand mb-0 h1 d-none d-sm-inline-block" style="flex:0 0 auto">Uni2Share</span>
             <div v-if="breadcrumbIsVisible" style="flex-grow:1; display:flex; min-width:0">
-                <breadcrumbs-component :items="displayBreadcrumbs" :current-last="!videoGridVisible && !musicGridVisible"
-                    v-on:select-breadcrumb="vm_getFolder"></breadcrumbs-component>
+                <breadcrumbs-component :items="displayBreadcrumbs" :current-last="(!videoGridVisible && !musicGridVisible) || cueViewVisible"
+                    v-on:select-breadcrumb="vm_selectBreadcrumb"></breadcrumbs-component>
             </div>
             <template id="search-component" v-if="searchIsVisible">
                 <div class="search-component-wrapper" style="position:relative; flex-grow: 1">
@@ -495,7 +495,7 @@
                     <button v-if="newsEnabled" type="button" v-on:click.stop="vm_menuAction(vm_openNewsPage)">
                         <i class="fa fa-bell"></i> 新上架<span v-if="newsUnread > 0" class="news-count">{{ newsUnread > 99 ? '99+' : newsUnread }}</span>
                     </button>
-                    <button v-if="nowPlaying.id && !inPlayingFolder" type="button" v-on:click.stop="vm_menuAction(vm_goPlayingFolder)">
+                    <button v-if="nowPlaying.id && (!inPlayingFolder || playingCueHidden)" type="button" v-on:click.stop="vm_menuAction(vm_goPlayingFolder)">
                         <i class="fa fa-folder-open"></i> 回到播放中
                     </button>
                     <button v-if="isLoggedIn" type="button" v-on:click.stop="vm_menuAction(vm_showFavorites)">
@@ -572,12 +572,6 @@
                 </span>
                 <span class="rating-num">{{ currentRating.rating > 0 ? currentRating.rating : '未評分' }}</span>
             </span>
-            <button type="button" class="btn btn-sm btn-outline-secondary" v-on:click="vm_copyCurrentRating()">
-                <i class="fa fa-copy"></i> 複製
-            </button>
-            <button v-if="canEditCover" type="button" class="btn btn-sm btn-outline-secondary" title="搜尋並更換封面" v-on:click="vm_openCoverEdit()">
-                <i class="fa fa-image"></i> 改圖
-            </button>
         </div>
         <div v-if="currentRating && currentRating.kind === 'anime' && currentRating.unplayable" style="padding:6px 5px 0; display:flex; align-items:center; flex-wrap:wrap; gap:6px 10px;">
             <span class="unplay-tag" style="margin-left:0;"><i class="fa fa-ban"></i> 無法播放</span>
@@ -710,7 +704,7 @@
                             v-on:click="vm_togglePin(currentFolderId)">
                             <i class="fa-solid fa-thumbtack"></i> {{ pinMap[currentFolderId] ? '已置頂' : '置頂' }}
                         </button>
-                        <button type="button" class="btn btn-sm btn-outline-secondary" title="切換列表檢視" v-on:click="showListView = true">
+                        <button v-if="!cueAlbum" type="button" class="btn btn-sm btn-outline-secondary" title="切換列表檢視" v-on:click="showListView = true">
                             <i class="fa fa-list"></i> 列表
                         </button>
                     </div>
@@ -1234,6 +1228,7 @@
                     cueNote: '',
                     cueNoteTimer: 0,
                     cuePlayFolderId: '',
+                    cuePlayItemId: '',
                     tierBusy: false,
                     tierProgress: '',
                     tierPreview: null,
@@ -1359,6 +1354,13 @@
                         return false;
                     }
                     return this.allItems.length >= 6 || this.sortMode !== 'default';
+                },
+                // 正在播的是 CUE 專輯的歌，但畫面上現在沒有顯示那張專輯
+                playingCueHidden: function() {
+                    if (String(this.nowPlaying.id).indexOf('cue:') !== 0 || !this.cuePlayItemId) {
+                        return false;
+                    }
+                    return !(this.cueViewVisible && this.cueAlbum.data.key === this.playQueueCueKey);
                 },
                 // 目前畫面是否就是正在播放那首歌所在的資料夾（搜尋、我的最愛這類跨資料夾的清單不算）
                 inPlayingFolder: function() {
@@ -1503,6 +1505,15 @@
                 },
                 // 追番畫面已把資料夾名稱當標題顯示，麵包屑不重複顯示最後一層
                 displayBreadcrumbs: function() {
+                    if (this.cueViewVisible && this.breadcrumbs.length > 0) {
+                        // CUE 專輯畫面：保留資料夾這一層（點了回到檔案列表），後面再加一層專輯名稱
+                        let list = this.breadcrumbs.slice();
+                        if (this.currentRating) {
+                            list[list.length - 1] = Object.assign({}, list[list.length - 1], { text: this.currentRating.name });
+                        }
+                        list.push({ id: null, text: (this.musicFolder && this.musicFolder.title) || 'CUE 專輯' });
+                        return list;
+                    }
                     if ((this.videoGridVisible || this.musicGridVisible) && this.breadcrumbs.length > 1) {
                         return this.breadcrumbs.slice(0, -1);
                     }
@@ -2144,7 +2155,33 @@
                         });
                     }, 120);
                 },
+                // 播的是 CUE 專輯：回到那張專輯的畫面（不在那個資料夾就先進去，再打開那個 .cue／.flac）
+                vm_goPlayingCue: function () {
+                    let itemId = this.cuePlayItemId;
+                    if (!itemId || !this.cuePlayFolderId) {
+                        return;
+                    }
+                    if (this.cueViewVisible && this.cueAlbum.data.key === this.playQueueCueKey) {
+                        this.vm_revealPlaying();
+                        return;
+                    }
+                    let open = () => {
+                        let it = this.allItems.find(t => t.id === itemId);
+                        if (it) {
+                            this.vm_cueAlbumOpen(it, true);
+                        }
+                    };
+                    if (this.inPlayingFolder) {
+                        open();
+                        return;
+                    }
+                    this.vm_getFolder(this.cuePlayFolderId, true).then(open);
+                },
                 vm_goPlayingFolder: function () {
+                    if (String(this.nowPlaying.id).indexOf('cue:') === 0) {
+                        this.vm_goPlayingCue();
+                        return;
+                    }
                     let path = this.vm_playingFolderPath();
                     if (!path) {
                         return;
@@ -2247,11 +2284,6 @@
                 },
                 vm_ratingText: function (name, rating) {
                     return name + '：' + (rating > 0 ? rating : '未評分');
-                },
-                vm_copyCurrentRating: function () {
-                    if (this.currentRating) {
-                        this.vm_copyText(this.vm_ratingText(this.currentRating.name, this.currentRating.rating));
-                    }
                 },
                 // 複製目前清單（含目前的排序與篩選）：給人或語言模型看都容易懂的純文字，每行「名稱：評分」
                 vm_copyRatingList: function () {
@@ -3013,6 +3045,14 @@
                         lastFolder: (last && last !== requestedId) ? last : ''
                     };
                 },
+                // 點麵包屑：點的是目前這個資料夾、而且正顯示 CUE 專輯畫面，就只是收掉專輯畫面回到檔案列表（不重新載入）
+                vm_selectBreadcrumb: function (id, pushState) {
+                    if (this.cueAlbum && id === this.currentFolderId) {
+                        this.vm_cueAlbumClose();
+                        return;
+                    }
+                    this.vm_getFolder(id, pushState);
+                },
                 vm_getFolder: function (folder, pushState, revealPlaying) {
                     this.vm_cueAlbumClose();
                     this.loading = true;
@@ -3150,12 +3190,12 @@
                         return !!pm && pm[1].toLowerCase() === base && partnerExts.indexOf(pm[2].toLowerCase()) !== -1;
                     });
                 },
-                vm_cueAlbumOpen: function (item) {
+                vm_cueAlbumOpen: function (item, revealPlaying) {
                     this.vm_cueAlbumStopPoll();
                     this.setSelectedItem(item.id);
                     this.showListView = false;
                     this.cueNote = '';
-                    this.cueAlbum = { phase: 'loading', id: item.id, name: item.title, data: null, error: '', coverStarted: false, coverUrlSet: false };
+                    this.cueAlbum = { phase: 'loading', id: item.id, name: item.title, data: null, error: '', coverStarted: false, coverUrlSet: false, reveal: !!revealPlaying };
                     this.vm_cueAlbumFetch(item.id);
                 },
                 vm_cueAlbumFetch: function (id) {
@@ -3179,6 +3219,10 @@
                         dlg.phase = 'show';
                         dlg.data = a;
                         this.vm_cueAlbumSyncQueue(a);
+                        if (dlg.reveal) {
+                            dlg.reveal = false;
+                            this.$nextTick(() => this.vm_revealPlaying());
+                        }
                         if (dlg.coverStarted === false) {
                             dlg.coverStarted = true;
                             this.vm_cueAlbumCover(dlg);
@@ -3303,6 +3347,7 @@
                     }
                     this.playQueueCueKey = (this.cueAlbum && this.cueAlbum.data) ? this.cueAlbum.data.key : '';
                     this.cuePlayFolderId = this.currentFolderId || '';
+                    this.cuePlayItemId = this.cueAlbum ? this.cueAlbum.id : '';
                     this.playQueue = items;
                     this.playQueueIndex = idx;
                     this.playQueueGain = false;
