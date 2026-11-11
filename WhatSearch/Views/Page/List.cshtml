@@ -691,22 +691,6 @@
                         <button type="button" class="btn btn-success" v-on:click="vm_albumPlayClick()">
                             <i class="fa" :class="albumPlayState === 'pause' ? 'fa-pause' : 'fa-play'"></i> {{ albumPlayState === 'pause' ? '暫停' : (albumPlayState === 'resume' ? '繼放' : '播放') }}
                         </button>
-                        <button v-if="isLoggedIn && currentFolderId && !cueAlbum" type="button" class="btn btn-sm"
-                            :class="favAlbumMap[currentFolderId] ? 'btn-danger' : 'btn-outline-danger'"
-                            title="收藏這張專輯"
-                            v-on:click="vm_toggleFav('album', currentFolderId)">
-                            <i :class="favAlbumMap[currentFolderId] ? 'fa-solid fa-heart' : 'fa-regular fa-heart'"></i>
-                            {{ favAlbumMap[currentFolderId] ? '已收藏' : '收藏' }}
-                        </button>
-                        <button v-if="isLoggedIn && currentFolderId && !cueAlbum" type="button" class="btn btn-sm"
-                            :class="pinMap[currentFolderId] ? 'btn-primary' : 'btn-outline-primary'"
-                            :title="pinMap[currentFolderId] ? '取消置頂這張專輯' : '在上一層置頂這張專輯'"
-                            v-on:click="vm_togglePin(currentFolderId)">
-                            <i class="fa-solid fa-thumbtack"></i> {{ pinMap[currentFolderId] ? '已置頂' : '置頂' }}
-                        </button>
-                        <button v-if="!cueAlbum" type="button" class="btn btn-sm btn-outline-secondary" title="切換列表檢視" v-on:click="showListView = true">
-                            <i class="fa fa-list"></i> 列表
-                        </button>
                     </div>
                     <div v-if="cueAlbum && cueAlbum.data" style="margin-top:10px; font-size:13px;">
                         <template v-if="cueAlbum.data.state === 'failed'">
@@ -729,19 +713,19 @@
             </div>
         </div>
         <div v-if="favView" style="padding:8px 5px 0; display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
-            <button type="button" class="btn btn-sm" :class="favTab === 'album' ? 'btn-success' : 'btn-outline-success'"
+            <button v-if="favAlbumCount > 0" type="button" class="btn btn-sm" :class="favTabEff === 'album' ? 'btn-success' : 'btn-outline-success'"
                 v-on:click="favTab = 'album'">專輯 ({{ favAlbumCount }})</button>
-            <button type="button" class="btn btn-sm" :class="favTab === 'track' ? 'btn-success' : 'btn-outline-success'"
+            <button v-if="favAlbumCount > 0" type="button" class="btn btn-sm" :class="favTabEff === 'track' ? 'btn-success' : 'btn-outline-success'"
                 v-on:click="favTab = 'track'">單曲 ({{ favTrackCount }})</button>
+            <span v-else style="font-size:14px; color:#555;">單曲 ({{ favTrackCount }})</span>
             <button v-if="favMissing > 0" type="button" class="btn btn-sm btn-outline-danger" :disabled="favPruning" v-on:click="vm_pruneFavorites()"
                 title="資料夾改名或刪除後找不到的最愛，從清單中清掉"><i class="fa fa-broom"></i> 清除找不到的 {{ favMissing }} 筆</button>
-            <label v-if="favTab === 'track'" style="font-size:14px; cursor:pointer; user-select:none; margin-left:6px;">
+            <label v-if="favTabEff === 'track'" style="font-size:14px; cursor:pointer; user-select:none; margin-left:6px;">
                 <input type="checkbox" v-model="loudnessOn" /> 音量平衡<span v-if="favTarget !== null" style="color:#999;">（目標 {{ favTarget }} LUFS）</span>
             </label>
         </div>
         <div v-if="favView && items.length === 0 && !loading" style="padding:32px 16px; text-align:center; color:#888;">
-            <template v-if="favTab === 'album'">還沒有收藏專輯。<br />在專輯頁按「收藏」，就會出現在這裡。</template>
-            <template v-else>還沒有收藏單曲。<br />點歌曲旁的愛心，就會出現在這裡，可以連續播放。</template>
+            還沒有收藏單曲。<br />點歌曲旁的愛心，就會出現在這裡，可以連續播放。
         </div>
         <div v-if="hasMusicItems" style="padding:5px; display:flex; gap:16px; flex-wrap:wrap; font-size:14px;">
             <label style="cursor:pointer; user-select:none;">
@@ -810,7 +794,7 @@
                     <div v-if="item.artist || item.album" style="font-size: 11px;line-height:14px; color:#999; overflow:auto; white-space:nowrap">{{ formatArtistAlbum(item) }}</div>
                     <div v-if="item.path" style="font-size: 11px;line-height:14px; color:#999; overflow:auto; white-space:nowrap">{{ item.path }}</div>
                     <div v-if="item.type === 'music' && item.transcode_state && item.transcode_state !== 'ready'" class="tc-badge" :class="'tc-' + item.transcode_state"><i v-if="item.transcode_state === 'pending'" class="fa fa-spinner fa-spin"></i> {{ vm_transcodeText(item) }}</div>
-                    <div v-if="favView && favTab === 'track' && item.loudness_state" style="font-size: 11px;line-height:14px; color:#999; white-space:nowrap">{{ vm_loudnessText(item) }}</div>
+                    <div v-if="favView && favTabEff === 'track' && item.loudness_state" style="font-size: 11px;line-height:14px; color:#999; white-space:nowrap">{{ vm_loudnessText(item) }}</div>
                     <div style="font-size: 12px;line-height:12px; color:gray; display:flex; flex-direction:row; justify-content:space-between; align-items:center; gap:8px;">
                         <div v-if="item.rateable" style="flex:1 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">{{ vm_shortDate(item.modify) }}</div>
                         <div v-else style="padding-left:0px; width:50%; ">{{ item.modify }}</div>
@@ -1242,7 +1226,7 @@
                     favMissing: 0,
                     favMissingNames: [],
                     favPruning: false,
-                    favTab: 'album',
+                    favTab: 'track',
                     favTarget: null,
                     favPending: 0,
                     favPollTimer: null,
@@ -1321,7 +1305,7 @@
             computed: {
                 items: function() {
                     if (this.favView) {
-                        let type = this.favTab === 'album' ? 'folder' : 'music';
+                        let type = this.favTabEff === 'album' ? 'folder' : 'music';
                         return this.allItems.filter(t => t.type === type);
                     }
                     let base = this.allItems;
@@ -1694,6 +1678,10 @@
                         return 0;
                     }
                     return this.videoFolder.episodes.filter(e => this.vm_epState(e.item.id) === 'watched').length;
+                },
+                // 實際顯示的分頁：沒有（舊的）專輯收藏時一律是單曲
+                favTabEff: function() {
+                    return (this.favTab === 'album' && this.favAlbumCount > 0) ? 'album' : 'track';
                 },
                 favAlbumCount: function() {
                     return this.allItems.filter(t => t.type === 'folder').length;
@@ -3137,7 +3125,7 @@
                             let idx = musicItems.findIndex(t => t.id === item.id);
                             this.playQueue = idx === -1 ? [item] : musicItems;
                             this.playQueueIndex = idx === -1 ? 0 : idx;
-                            this.playQueueGain = this.favView && this.favTab === 'track';
+                            this.playQueueGain = this.favView && this.favTabEff === 'track';
                             this.playCoverUrl = (this.musicGridVisible && this.videoCoverUrl)
                                 ? this.videoCoverUrl
                                 : this.vm_findCoverUrl(musicItems);
