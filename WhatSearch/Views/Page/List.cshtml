@@ -1060,44 +1060,6 @@
         </div>
     </div>
 
-    <div class="lightbox-overlay" v-if="cueDialog">
-        <div class="lightbox-overlay-content" style="background:#fff; color:#222; border-radius:8px; padding:14px 16px; width:min(460px, 94vw); max-height:92%; overflow:auto;">
-            <div style="display:flex; justify-content:space-between; align-items:center; position:sticky; top:-14px; z-index:2; background:#fff; margin:-14px 0 0; padding:14px 0 8px;">
-                <div style="font-weight:bold;">CUE 拆成單曲 MP3</div>
-                <button type="button" class="btn btn-sm btn-outline-secondary" v-on:click="vm_cueClose()"><i class="fa fa-times"></i></button>
-            </div>
-            <div style="font-size:13px; color:#888; word-break:break-all; margin-bottom:6px;">{{ cueDialog.name }}</div>
-            <div v-if="cueDialog.phase === 'loading'" style="padding:14px 0; color:#888;">讀取 CUE 中…</div>
-            <div v-else-if="cueDialog.phase === 'error'" style="margin-bottom:12px; color:#dc3545;">{{ cueDialog.error }}</div>
-            <div v-else-if="cueDialog.plan">
-                <div style="font-size:13px; line-height:1.7; margin-bottom:8px;">
-                    <div><b>{{ cueDialog.plan.album }}</b><span v-if="cueDialog.plan.artist"> · {{ cueDialog.plan.artist }}</span><span v-if="cueDialog.plan.year"> · {{ cueDialog.plan.year }}</span></div>
-                    <div style="color:#666;">音檔：{{ cueDialog.plan.audio }}</div>
-                    <div style="color:#666;">輸出：<b>{{ cueDialog.plan.folder }}/</b>（共 {{ cueDialog.plan.tracks.length }} 首，MP3 {{ cueDialog.plan.bitrate }} kbps，含曲名、歌手、專輯、曲號標籤）</div>
-                    <div v-if="cueDialog.plan.existingCount > 0" style="color:#b26a00;">已有 {{ cueDialog.plan.existingCount }} 首存在，會略過不覆蓋。</div>
-                    <div style="color:#666;">原始 FLAC 與 CUE 不會被修改或刪除。</div>
-                </div>
-                <div style="max-height:200px; overflow:auto; border:1px solid #ddd; border-radius:4px; font-size:12px; padding:4px 8px; margin-bottom:10px;">
-                    <div v-for="t in cueDialog.plan.tracks" :key="t.number" style="white-space:nowrap; overflow:hidden; text-overflow:ellipsis;" :style="{color: t.exists ? '#aaa' : '#222'}">
-                        {{ t.number }}. {{ t.title }}<span v-if="t.exists"> （已存在）</span>
-                    </div>
-                </div>
-                <div v-if="cueDialog.phase === 'running' || cueDialog.phase === 'done' || cueDialog.phase === 'failed'" style="margin-bottom:10px;">
-                    <div class="progress" style="height:10px; margin-bottom:4px;">
-                        <div class="progress-bar" :class="cueDialog.phase === 'failed' ? 'bg-danger' : (cueDialog.phase === 'done' ? 'bg-success' : '')" :style="{width: (cueDialog.phase === 'done' ? 100 : cueDialog.progress) + '%'}"></div>
-                    </div>
-                    <div style="font-size:13px;" :style="{color: cueDialog.phase === 'failed' ? '#dc3545' : '#198754'}">{{ cueDialog.statusText }}</div>
-                </div>
-            </div>
-            <div style="display:flex; gap:8px; justify-content:flex-end; flex-wrap:wrap;">
-                <button v-if="cueDialog.phase === 'ready'" type="button" class="btn btn-primary" v-on:click="vm_cueStart()"><i class="fa fa-scissors"></i> 開始轉換</button>
-                <button v-if="cueDialog.phase === 'done'" type="button" class="btn btn-primary" v-on:click="vm_cueRefresh()"><i class="fa fa-rotate"></i> 重新整理列表</button>
-                <button v-if="cueDialog.phase === 'running'" type="button" class="btn btn-outline-secondary" v-on:click="vm_cueClose()">關閉（背景繼續）</button>
-                <button v-else type="button" class="btn btn-outline-secondary" v-on:click="vm_cueClose()">{{ cueDialog.phase === 'ready' ? '取消' : '關閉' }}</button>
-            </div>
-        </div>
-    </div>
-
     <div class="lightbox-overlay" v-if="tierPreview">
         <div class="lightbox-overlay-content" style="background:#fff; color:#222; border-radius:8px; padding:12px 14px; max-height:94%; overflow:auto;">
             <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; position:sticky; top:-12px; z-index:2; background:#fff; margin:-12px 0 0; padding:12px 0 8px;">
@@ -1290,12 +1252,10 @@
                     copyMsg: '',
                     copyDialog: null,
                     noticeDialog: null,
-                    cueDialog: null,
                     // 一般會員點 CUE／FLAC 開的「拆軌專輯」視窗（暫存拆軌）；playQueueCueKey 是目前播放佇列屬於哪張暫存專輯
                     cueAlbum: null,
                     cueAlbumTimer: 0,
                     playQueueCueKey: '',
-                    cueTimer: 0,
                     tierBusy: false,
                     tierProgress: '',
                     tierPreview: null,
@@ -3140,9 +3100,6 @@
                         } else if (item.type == 'text') {
                             console.log('preview text:' + item.get_url);
                             this.vm_previewText(item);
-                        } else if (this.isAdmin && /\.cue$/i.test(item.title)) {
-                            this.setSelectedItem(item.id);
-                            this.vm_cueOpen(item);
                         } else if (item.unsupported) {
                             this.setSelectedItem(item.id);
                             this.noticeDialog = { title: '無法開啟這個檔案', text: '不支援 ' + (item.title.lastIndexOf('.') > 0 ? item.title.substring(item.title.lastIndexOf('.')) : '這種') + ' 格式的檔案，沒辦法在網頁上開啟。', name: item.title };
@@ -3153,7 +3110,7 @@
                     }
                 },
                 // ----- CUE 專輯（登入會員點 CUE 或它的 FLAC；拆成暫存 MP3，轉好一首播一首） -----
-                // 觸發條件：伺服器有 ffmpeg，同一個資料夾裡有「同名」的 CUE 與音檔成對出現；管理者點 CUE 仍走原本的拆軌對話框
+                // 觸發條件：伺服器有 ffmpeg，同一個資料夾裡有「同名」的 CUE 與音檔成對出現
                 vm_cueAlbumTrigger: function (item) {
                     if (!this.transcodeEnabled || this.favView || this.newsView || item.path || item.type === 'folder') {
                         return false;
@@ -3167,9 +3124,6 @@
                     let audioExts = ['flac', 'wav', 'wv', 'ape', 'tta', 'm4a'];
                     let partnerExts;
                     if (ext === 'cue') {
-                        if (this.isAdmin) {
-                            return false;
-                        }
                         partnerExts = audioExts;
                     } else if (ext === 'flac') {
                         partnerExts = ['cue'];
@@ -3285,90 +3239,6 @@
                     let i = items.findIndex(x => x.id === cur);
                     if (i >= 0) {
                         this.playQueueIndex = i;
-                    }
-                },
-                // ----- CUE 拆成單曲 MP3（管理者；點 .cue 檔） -----
-                vm_cueOpen: function (item) {
-                    this.vm_cueStopPoll();
-                    this.cueDialog = { phase: 'loading', name: item.title, id: item.id, plan: null, error: '', jobId: '', progress: 0, statusText: '' };
-                    axios.post('/admin/convert/cue/preview', { id: item.id }).then(res => {
-                        if (!this.cueDialog || this.cueDialog.id !== item.id) { return; }
-                        let d = res.data || {};
-                        if (d.success === 1 && d.plan) {
-                            this.cueDialog.plan = d.plan;
-                            this.cueDialog.phase = d.plan.existingCount >= d.plan.tracks.length ? 'error' : 'ready';
-                            if (this.cueDialog.phase === 'error') {
-                                this.cueDialog.error = '「' + d.plan.folder + '」裡的 ' + d.plan.tracks.length + ' 首都已經存在，不需要再轉。';
-                            }
-                        } else {
-                            this.cueDialog.phase = 'error';
-                            this.cueDialog.error = d.message || '無法讀取這個 CUE';
-                        }
-                    }).catch(() => {
-                        if (this.cueDialog && this.cueDialog.id === item.id) {
-                            this.cueDialog.phase = 'error';
-                            this.cueDialog.error = '讀取失敗，請稍後再試';
-                        }
-                    });
-                },
-                vm_cueStart: function () {
-                    let dlg = this.cueDialog;
-                    if (!dlg || dlg.phase !== 'ready') { return; }
-                    dlg.phase = 'running';
-                    dlg.statusText = '排入佇列中…';
-                    axios.post('/admin/convert/cue/enqueue', { id: dlg.id }).then(res => {
-                        let d = res.data || {};
-                        if (d.success === 1) {
-                            dlg.jobId = d.jobId;
-                            this.vm_cuePoll();
-                        } else {
-                            dlg.phase = 'failed';
-                            dlg.statusText = d.message || '排入失敗';
-                        }
-                    }).catch(() => {
-                        dlg.phase = 'failed';
-                        dlg.statusText = '送出失敗，請稍後再試';
-                    });
-                },
-                vm_cuePoll: function () {
-                    this.vm_cueStopPoll();
-                    let tick = () => {
-                        let dlg = this.cueDialog;
-                        if (!dlg || dlg.phase !== 'running') { this.cueTimer = 0; return; }
-                        axios.get('/admin/convert/jobs').then(res => {
-                            let job = ((res.data && res.data.jobs) || []).find(j => j.id === dlg.jobId);
-                            if (!job) { dlg.phase = 'failed'; dlg.statusText = '找不到工作紀錄（可能被清除或伺服器重新啟動）'; return; }
-                            dlg.progress = job.progress || 0;
-                            if (job.state === 'pending') { dlg.statusText = '排隊中（前面還有其它轉檔工作）…'; }
-                            else if (job.state === 'running') { dlg.statusText = '轉換中 ' + dlg.progress + '%'; }
-                            else if (job.state === 'done') { dlg.phase = 'done'; dlg.statusText = job.message || '完成'; }
-                            else if (job.state === 'canceled') { dlg.phase = 'failed'; dlg.statusText = '已取消'; }
-                            else { dlg.phase = 'failed'; dlg.statusText = job.message || '失敗'; }
-                        }).catch(() => { }).finally(() => {
-                            if (this.cueDialog === dlg && dlg.phase === 'running') {
-                                this.cueTimer = window.setTimeout(tick, 2000);
-                            } else {
-                                this.cueTimer = 0;
-                            }
-                        });
-                    };
-                    this.cueTimer = window.setTimeout(tick, 1000);
-                },
-                vm_cueStopPoll: function () {
-                    if (this.cueTimer) {
-                        window.clearTimeout(this.cueTimer);
-                        this.cueTimer = 0;
-                    }
-                },
-                vm_cueClose: function () {
-                    this.vm_cueStopPoll();
-                    this.cueDialog = null;
-                },
-                vm_cueRefresh: function () {
-                    let id = this.currentFolderId;
-                    this.vm_cueClose();
-                    if (id) {
-                        this.vm_getFolder(id, 'replace');
                     }
                 },
                 vm_playVideo: function (item) {
