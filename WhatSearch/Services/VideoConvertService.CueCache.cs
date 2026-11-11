@@ -172,7 +172,7 @@ namespace WhatSearch.Services
             CueAlbumResult result = new CueAlbumResult
             {
                 Cue = Path.GetFileName(cuePath),
-                Album = plan.Album,
+                Album = plan.Title,
                 Artist = plan.Artist,
                 Year = plan.Year,
                 Total = plan.Tracks.Count
