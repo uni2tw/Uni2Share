@@ -1,7 +1,12 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
 using System.Linq;
+using NLog;
+using WhatSearch.Core;
+using WhatSearch.Utilities;
+using WhatSearch.Utility;
 
 namespace WhatSearch.Services
 {
@@ -29,6 +34,8 @@ namespace WhatSearch.Services
         /// </summary>
         IPlaybackStream Begin(PlaybackWho who, string requestPath, bool mp3);
         PlaybackSnapshot GetSnapshot();
+        /// <summary>把有變動、還沒寫檔的統計寫到 data/playback-stats.json（monitor.persist 關閉時什麼都不做）；定期存檔與正常關閉時呼叫</summary>
+        void Flush();
     }
 
     public class PlaybackSession
@@ -85,8 +92,10 @@ namespace WhatSearch.Services
     }
 
     /// <summary>
-    /// 後台「播放監控」的資料來源：只放在記憶體（重新啟動就歸零），只記錄 /get/ 的影音播放，
-    /// 不含封面、字幕、下載。位元組數是實際寫進回應的量（客戶端中途中斷就只算到中斷前）。
+    /// 後台「播放監控」的資料來源：只記錄 /get/ 的影音播放，不含封面、字幕、下載。
+    /// 位元組數是實際寫進回應的量（客戶端中途中斷就只算到中斷前）。
+    /// 近 7 天的每日統計會定期（monitor.flushSeconds）與正常關閉時寫到 data/playback-stats.json，啟動時讀回；
+    /// 「現在誰在播」與即時速率只放記憶體。強制結束行程時最多掉最後一個存檔週期的資料。
     /// </summary>
     public class PlaybackMonitorService : IPlaybackMonitorService
     {
@@ -97,6 +106,9 @@ namespace WhatSearch.Services
         const int TopUsers = 10;
         const double SlowMbps = 1.0;
         const int SlowAfterSeconds = 20;
+        const string DayFormat = "yyyy-MM-dd";
+
+        static readonly ILogger logger = LogManager.GetCurrentClassLogger();
 
         static readonly HashSet<string> VideoExtensions = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
         {
@@ -109,6 +121,132 @@ namespace WhatSearch.Services
         readonly RateWindow total = new RateWindow();
         readonly DateTime startedAt = DateTime.Now;
         DayStat today;
+
+        // 存檔：saveGate 讓「取快照＋寫檔」一次只有一個人做（先 saveGate 再 gate，不能反過來），避免舊快照蓋掉新的
+        readonly object saveGate = new object();
+        readonly bool persist;
+        bool dirty;
+        System.Threading.Timer flushTimer;
+
+        public PlaybackMonitorService()
+        {
+            MonitorConfig cfg = Ioc.GetConfig().Monitor;
+            if (cfg == null || cfg.Persist == false)
+            {
+                return;
+            }
+            persist = true;
+            Load();
+            int seconds = Math.Max(5, cfg.FlushSeconds);
+            flushTimer = new System.Threading.Timer(_ => Flush(), null, seconds * 1000, seconds * 1000);
+        }
+
+        static string DataPath()
+        {
+            return Helper.GetRelativePath("data", "playback-stats.json");
+        }
+
+        void Load()
+        {
+            try
+            {
+                string path = DataPath();
+                if (File.Exists(path) == false)
+                {
+                    return;
+                }
+                StatsFile file = JsonHelper.Deserialize<StatsFile>(File.ReadAllText(path));
+                if (file == null || file.Days == null)
+                {
+                    return;
+                }
+                DateTime now = DateTime.Now.Date;
+                DateTime oldest = now.AddDays(-(KeepDays - 1));
+                lock (gate)
+                {
+                    foreach (DayDto dto in file.Days)
+                    {
+                        DateTime day;
+                        if (dto == null
+                            || DateTime.TryParseExact(dto.Day, DayFormat, CultureInfo.InvariantCulture, DateTimeStyles.None, out day) == false
+                            || day < oldest || day > now || days.Any(t => t.Day == day))
+                        {
+                            continue;
+                        }
+                        DayStat d = new DayStat { Day = day, Bytes = Math.Max(0, dto.Bytes), Plays = Math.Max(0, dto.Plays) };
+                        if (dto.Hours != null)
+                        {
+                            for (int i = 0; i < Math.Min(24, dto.Hours.Length); i++)
+                            {
+                                d.Hours[i] = Math.Max(0, dto.Hours[i]);
+                            }
+                        }
+                        if (dto.Users != null)
+                        {
+                            foreach (KeyValuePair<string, UserDto> p in dto.Users.Where(t => t.Value != null))
+                            {
+                                d.Users[p.Key] = new UserBytes { Display = p.Value.Display, Bytes = Math.Max(0, p.Value.Bytes) };
+                            }
+                        }
+                        if (dto.Folders != null)
+                        {
+                            foreach (KeyValuePair<string, int> p in dto.Folders) { d.Folders[p.Key] = Math.Max(0, p.Value); }
+                        }
+                        if (dto.Devices != null)
+                        {
+                            foreach (KeyValuePair<string, int> p in dto.Devices) { d.Devices[p.Key] = Math.Max(0, p.Value); }
+                        }
+                        days.Add(d);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                logger.Warn(ex, "讀取 playback-stats.json 失敗，以空白資料開始");
+            }
+        }
+
+        public void Flush()
+        {
+            if (persist == false)
+            {
+                return;
+            }
+            lock (saveGate)
+            {
+                StatsFile file;
+                lock (gate)
+                {
+                    if (dirty == false)
+                    {
+                        return;
+                    }
+                    dirty = false;
+                    file = new StatsFile
+                    {
+                        Days = days.Select(d => new DayDto
+                        {
+                            Day = d.Day.ToString(DayFormat, CultureInfo.InvariantCulture),
+                            Bytes = d.Bytes,
+                            Plays = d.Plays,
+                            Hours = (long[])d.Hours.Clone(),
+                            Users = d.Users.ToDictionary(p => p.Key, p => new UserDto { Display = p.Value.Display, Bytes = p.Value.Bytes }),
+                            Folders = new Dictionary<string, int>(d.Folders),
+                            Devices = new Dictionary<string, int>(d.Devices)
+                        }).ToList()
+                    };
+                }
+                try
+                {
+                    SafeFile.WriteAllTextAtomic(DataPath(), JsonHelper.Serialize(file));
+                }
+                catch (Exception ex)
+                {
+                    logger.Warn(ex, "寫入 playback-stats.json 失敗，下個週期再試");
+                    lock (gate) { dirty = true; }
+                }
+            }
+        }
 
         public IPlaybackStream Begin(PlaybackWho who, string requestPath, bool mp3)
         {
@@ -145,6 +283,7 @@ namespace WhatSearch.Services
                     sessions[key] = s;
 
                     DayStat d = GetToday(now);
+                    dirty = true;
                     d.Plays++;
                     Increment(d.Folders, folder.Length > 0 ? folder : "（根目錄）");
                     Increment(d.Devices, string.IsNullOrEmpty(who.Device) ? "unknown" : who.Device);
@@ -267,6 +406,7 @@ namespace WhatSearch.Services
                 total.Add(bytes, sec);
 
                 DayStat d = GetToday(now);
+                dirty = true;
                 d.Bytes += bytes;
                 d.Hours[now.Hour] += bytes;
                 UserBytes u;
@@ -328,6 +468,29 @@ namespace WhatSearch.Services
         {
             public string Display;
             public long Bytes;
+        }
+
+        // 存檔用的資料結構（欄位名稱就是 JSON 的 key）
+        sealed class StatsFile
+        {
+            public List<DayDto> Days { get; set; }
+        }
+
+        sealed class DayDto
+        {
+            public string Day { get; set; }
+            public long Bytes { get; set; }
+            public int Plays { get; set; }
+            public long[] Hours { get; set; }
+            public Dictionary<string, UserDto> Users { get; set; }
+            public Dictionary<string, int> Folders { get; set; }
+            public Dictionary<string, int> Devices { get; set; }
+        }
+
+        sealed class UserDto
+        {
+            public string Display { get; set; }
+            public long Bytes { get; set; }
         }
 
         sealed class DayStat

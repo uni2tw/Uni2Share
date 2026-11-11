@@ -41,6 +41,23 @@ namespace WhatSearch.Core
             return remote.ToString();
         }
 
+        /// <summary>
+        /// 這個請求是不是「直接從本機連進來」：連線位址是回送位址（127.0.0.1／::1），而且沒有任何代理轉發標頭。
+        /// 站台放在同一台機器的反向代理後面時，外部請求經代理轉進來的連線位址也是本機，但代理會帶 X-Forwarded-For 之類的標頭，所以有標頭就不算
+        /// </summary>
+        public static bool IsDirectLoopback(HttpContext context)
+        {
+            IPAddress remote = Normalize(context.Connection.RemoteIpAddress);
+            if (remote == null || IPAddress.IsLoopback(remote) == false)
+            {
+                return false;
+            }
+            IHeaderDictionary h = context.Request.Headers;
+            return h.ContainsKey("X-Forwarded-For") == false
+                && h.ContainsKey("Forwarded") == false
+                && h.ContainsKey("X-Real-IP") == false;
+        }
+
         /// <summary>這個位址是不是設定的 IP 白名單裡的（單一 IP 或 a.b.c.d/nn）；清單是空的一律 false</summary>
         public static bool InList(string ip, IList<string> list)
         {

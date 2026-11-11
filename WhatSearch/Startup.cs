@@ -7,6 +7,7 @@ using Microsoft.AspNetCore.Http.Features;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.FileProviders;
 using Microsoft.Extensions.Hosting;
+using WhatSearch.Services;
 using NLog;
 using NLog.Web;
 using System;
@@ -83,6 +84,14 @@ namespace WhatSearch
                     }
                 });
             }
+
+            // 正常關閉（Ctrl+C、服務停止、/admin/shutdown）時，把播放監控還沒寫檔的統計補存。
+            // 用強制結束行程的方式關站不會走到這裡，靠定期存檔（monitor.flushSeconds）兜底
+            appLifetime.ApplicationStopping.Register(() =>
+            {
+                try { Ioc.Get<IPlaybackMonitorService>().Flush(); }
+                catch (Exception ex) { NLog.LogManager.GetLogger("Shutdown").Warn(ex, "關閉時補存播放監控失敗"); }
+            });
 
             // 放在最前面，才看得到靜態檔也找不到的請求
             app.UseMiddleware<AbnormalRequestMiddleware>();
