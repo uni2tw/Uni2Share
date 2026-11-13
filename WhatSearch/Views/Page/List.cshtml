@@ -845,7 +845,7 @@
                 <div v-if="nowPlaying.artist || nowPlaying.album || nowPlaying.format" style="font-size:11px; color:#aaa; white-space:nowrap; text-overflow:ellipsis; overflow:hidden;">{{ formatArtistAlbum(nowPlaying) }}<span v-if="nowPlaying.format" :style="{color: nowPlaying.format === 'FLAC 原檔' ? '#e0b45c' : '#8fd19e'}">{{ (nowPlaying.artist || nowPlaying.album) ? ' · ' : '' }}{{ nowPlaying.format }}</span></div>
             </div>
             <div style="white-space:nowrap; font-size:12px;">{{ formatTime(seekingTime !== null ? seekingTime : nowPlaying.currentTime) }} / {{ formatTime(nowPlaying.duration) }}</div>
-            <div v-if="isLoggedIn" class="fav-btn" :class="{'fav-on': favTrackMap[nowPlaying.id]}" title="加入最愛"
+            <div v-if="isLoggedIn && String(nowPlaying.id).indexOf('cue:') !== 0" class="fav-btn" :class="{'fav-on': favTrackMap[nowPlaying.id]}" title="加入最愛"
                 v-on:click.stop="vm_toggleFav('track', nowPlaying.id)">
                 <i :class="favTrackMap[nowPlaying.id] ? 'fa-solid fa-heart' : 'fa-regular fa-heart'"></i>
             </div>
@@ -2985,6 +2985,10 @@
                     });
                 },
                 vm_canFav: function (item) {
+                    // 會開 CUE 專輯畫面的 CUE／FLAC 只是專輯入口，不是單曲，不能收藏
+                    if (item.type === 'music' && this.vm_cueAlbumTrigger(item)) {
+                        return false;
+                    }
                     return this.isLoggedIn === true && (item.type === 'music' || (this.favView && item.type === 'folder'));
                 },
                 vm_isFav: function (item) {
