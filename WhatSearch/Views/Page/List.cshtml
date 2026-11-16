@@ -353,6 +353,41 @@
     .item-row.drag-shift {
         transition: transform .15s;
     }
+    /* 我的最愛：資料夾／愛心按鈕。桌機（有滑鼠）照舊常駐；觸控裝置預設隱藏，長按那一列才浮在右側出現，幾秒沒操作就收起 */
+    .fav-actions {
+        display: flex;
+        flex: 0 0 auto;
+    }
+    @@media (hover: none) {
+        .item-row.fav-row-touch {
+            position: relative;
+            -webkit-touch-callout: none;
+            -webkit-user-select: none;
+            user-select: none;
+        }
+        .item-row.fav-row-touch.fav-row-open {
+            background: #f3f7ff;
+        }
+        .item-row.fav-row-touch .fav-actions {
+            display: none;
+            position: absolute;
+            right: 0;
+            top: 0;
+            bottom: 0;
+            align-items: center;
+            padding-left: 18px;
+            background: linear-gradient(to right, rgba(243,247,255,0), #f3f7ff 18px);
+            z-index: 3;
+        }
+        .item-row.fav-row-touch .fav-actions.open {
+            display: flex;
+            animation: favActionsIn .15s ease-out;
+        }
+    }
+    @@keyframes favActionsIn {
+        from { opacity: 0; }
+        to { opacity: 1; }
+    }
     .fav-btn.fav-on {
         color: #e0245e;
     }
@@ -796,8 +831,10 @@
             </button>
         </div>
         <template v-if="!videoGridVisible && !musicGridVisible">
-        <div v-for="(item, index) in items" v-on:click="vm_itemOver(item.id); vm_changeFolder(item)"
-                :class="{'item-row': true, 'selected-item-row': item.selected}"
+        <div v-for="(item, index) in items" v-on:click="vm_rowClick(item)"
+                v-on:pointerdown="vm_rowPressStart($event, item)" v-on:pointermove="vm_rowPressMove($event)"
+                v-on:pointerup="vm_rowPressEnd()" v-on:pointercancel="vm_rowPressEnd()" v-on:contextmenu="vm_rowContext($event, item)"
+                :class="{'item-row': true, 'selected-item-row': item.selected, 'fav-row-touch': vm_isFavTrackRow(item), 'fav-row-open': favActionsId === item.id}"
                 style="display:flex; padding:10px 5px; width:100%; cursor:pointer; min-height:48px; align-items:center;"
                 >
             <a :name="item.id"></a>
@@ -850,11 +887,17 @@
                 v-on:click.stop="vm_togglePin(item.id)">
                 <i class="fa-solid fa-thumbtack" :style="pinMap[item.id] ? '' : 'transform:rotate(45deg); opacity:.55;'"></i>
             </div>
-            <div v-if="favView && favTabEff === 'track' && item.type === 'music'" class="fav-btn" title="到這首歌所在的資料夾"
-                v-on:click.stop="vm_goTrackFolder(item)">
-                <i class="fa-solid fa-folder-open" style="color:orange;"></i>
+            <div v-if="vm_isFavTrackRow(item)" class="fav-actions" :class="{open: favActionsId === item.id}" v-on:click.stop v-on:pointerdown.stop>
+                <div class="fav-btn" title="到這首歌所在的資料夾"
+                    v-on:click.stop="vm_favActionsHide(); vm_goTrackFolder(item)">
+                    <i class="fa-solid fa-folder-open" style="color:orange;"></i>
+                </div>
+                <div v-if="vm_canFav(item)" class="fav-btn" :class="{'fav-on': vm_isFav(item)}" title="加入最愛"
+                    v-on:click.stop="vm_favActionsBump(); vm_toggleFav('track', item.id)">
+                    <i :class="vm_isFav(item) ? 'fa-solid fa-heart' : 'fa-regular fa-heart'"></i>
+                </div>
             </div>
-            <div v-if="vm_canFav(item)" class="fav-btn" :class="{'fav-on': vm_isFav(item)}" title="加入最愛"
+            <div v-else-if="vm_canFav(item)" class="fav-btn" :class="{'fav-on': vm_isFav(item)}" title="加入最愛"
                 v-on:click.stop="vm_toggleFav(item.type === 'folder' ? 'album' : 'track', item.id)">
                 <i :class="vm_isFav(item) ? 'fa-solid fa-heart' : 'fa-regular fa-heart'"></i>
             </div>
@@ -1247,6 +1290,10 @@
                     cueNoteTimer: 0,
                     cuePlayFolderId: '',
                     dragState: null,
+                    favActionsId: '',
+                    favActionsTimer: null,
+                    favPress: null,
+                    favSwallowClickUntil: 0,
                     cuePlayItemId: '',
                     tierBusy: false,
                     tierProgress: '',
@@ -2178,11 +2225,99 @@
                     }, 120);
                 },
                 // 播的是 CUE 專輯：回到那張專輯的畫面（不在那個資料夾就先進去，再打開那個 .cue／.flac）
+                // ----- 我的最愛（觸控裝置）：長按那一列，浮出「資料夾／愛心」按鈕，幾秒沒操作就收起 -----
+                vm_isFavTrackRow: function (item) {
+                    return this.favView && this.favTabEff === 'track' && item.type === 'music';
+                },
+                vm_isTouchOnly: function () {
+                    try { return window.matchMedia('(hover: none)').matches; } catch (e) { return false; }
+                },
+                // 長按成功放開手指時瀏覽器還會送一個 click，要擋掉，不然會變成播放
+                vm_rowClick: function (item) {
+                    if (Date.now() < this.favSwallowClickUntil) {
+                        return;
+                    }
+                    this.vm_itemOver(item.id);
+                    this.vm_changeFolder(item);
+                },
+                vm_rowPressStart: function (e, item) {
+                    this.vm_rowPressCancel();
+                    if (this.favActionsId && !(e.target.closest && e.target.closest('.fav-actions'))) {
+                        this.vm_favActionsHide();
+                    }
+                    if (e.pointerType !== 'touch' || !this.vm_isFavTrackRow(item) || !this.vm_isTouchOnly()) {
+                        return;
+                    }
+                    let press = { id: item.id, x: e.clientX, y: e.clientY, fired: false, timer: 0 };
+                    press.timer = window.setTimeout(() => {
+                        press.fired = true;
+                        this.vm_favActionsShow(item.id);
+                    }, 500);
+                    this.favPress = press;
+                },
+                vm_rowPressMove: function (e) {
+                    let p = this.favPress;
+                    if (p && !p.fired && (Math.abs(e.clientX - p.x) > 10 || Math.abs(e.clientY - p.y) > 10)) {
+                        this.vm_rowPressCancel();
+                    }
+                },
+                vm_rowPressEnd: function () {
+                    let p = this.favPress;
+                    if (p && p.fired) {
+                        this.favSwallowClickUntil = Date.now() + 500;
+                    }
+                    this.vm_rowPressCancel();
+                },
+                vm_rowPressCancel: function () {
+                    if (this.favPress) {
+                        window.clearTimeout(this.favPress.timer);
+                        this.favPress = null;
+                    }
+                },
+                // 觸控裝置上，瀏覽器自己的長按選單（複製、分享…）會蓋掉我們的按鈕，這幾列不要
+                vm_rowContext: function (e, item) {
+                    if (this.vm_isFavTrackRow(item) && this.vm_isTouchOnly()) {
+                        e.preventDefault();
+                    }
+                },
+                vm_favActionsShow: function (id) {
+                    this.favActionsId = id;
+                    try { if (navigator.vibrate) { navigator.vibrate(30); } } catch (e) { }
+                    this.vm_favActionsBump();
+                    if (!this.favActionsDocHandler) {
+                        // 點到按鈕以外的地方、或開始捲動，就立刻收起
+                        this.favActionsDocHandler = ev => {
+                            if (!(ev.target && ev.target.closest && ev.target.closest('.fav-actions'))) {
+                                this.vm_favActionsHide();
+                            }
+                        };
+                        this.favActionsScrollHandler = () => this.vm_favActionsHide();
+                        document.addEventListener('pointerdown', this.favActionsDocHandler, true);
+                        window.addEventListener('scroll', this.favActionsScrollHandler, { passive: true });
+                    }
+                },
+                // 每次操作都重新計時（4 秒）
+                vm_favActionsBump: function () {
+                    window.clearTimeout(this.favActionsTimer);
+                    this.favActionsTimer = window.setTimeout(() => this.vm_favActionsHide(), 4000);
+                },
+                vm_favActionsHide: function () {
+                    window.clearTimeout(this.favActionsTimer);
+                    this.favActionsTimer = null;
+                    this.favActionsId = '';
+                    if (this.favActionsDocHandler) {
+                        document.removeEventListener('pointerdown', this.favActionsDocHandler, true);
+                        window.removeEventListener('scroll', this.favActionsScrollHandler);
+                        this.favActionsDocHandler = null;
+                        this.favActionsScrollHandler = null;
+                    }
+                },
                 // ----- 我的最愛：按住把手拖曳排序 -----
                 vm_dragStart: function (e, item) {
                     if (this.dragState || (e.pointerType === 'mouse' && e.button !== 0)) {
                         return;
                     }
+                    this.vm_favActionsHide();
                     let rows = Array.prototype.slice.call(document.querySelectorAll('.item-row'));
                     let handle = e.currentTarget;
                     let row = handle.closest('.item-row');
