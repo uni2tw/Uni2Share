@@ -6,6 +6,8 @@ using System.Threading.Tasks;
 using WhatSearch.Jobs;
 using System;
 using NLog;
+using System.Diagnostics;
+using System.Threading;
 
 namespace WhatSearch.Services
 {
@@ -19,14 +21,28 @@ namespace WhatSearch.Services
 
         public override void Start(List<FolderConfig> startFolders)
         {
+            Stopwatch total = Stopwatch.StartNew();
+            int remaining = startFolders.Count;
             foreach (var folder in startFolders)
             {
                 string folderPath = folder.Path;
                 Task.Run(() =>
                 {
-                    StartSeek(folderPath);
-                });                
-            }            
+                    Stopwatch root = Stopwatch.StartNew();
+                    try
+                    {
+                        StartSeek(folderPath);
+                    }
+                    finally
+                    {
+                        logger.Info("索引掃描：根目錄 {0} 掃完，耗時 {1:F1} 秒", folderPath, root.Elapsed.TotalSeconds);
+                        if (Interlocked.Decrement(ref remaining) == 0)
+                        {
+                            LogScanSummary(total);
+                        }
+                    }
+                });
+            }
         }
 
         private void SeekFile(string filePath)
@@ -42,7 +58,10 @@ namespace WhatSearch.Services
             {
                 return;
             }
-            foreach (var subDirInfo in dirInfo.GetDirectories())
+            Stopwatch walk = Stopwatch.StartNew();
+            DirectoryInfo[] rootSubs = dirInfo.GetDirectories();
+            AddWalkTicks(walk.ElapsedTicks);
+            foreach (var subDirInfo in rootSubs)
             {
                 SeekFolder(subDirInfo.FullName);
             }
@@ -62,7 +81,9 @@ namespace WhatSearch.Services
                 {
                     return;
                 }
+                Stopwatch walk = Stopwatch.StartNew();
                 subDirInfos = dirInfo.GetDirectories();
+                AddWalkTicks(walk.ElapsedTicks);
             }
             catch (Exception ex)
             {
