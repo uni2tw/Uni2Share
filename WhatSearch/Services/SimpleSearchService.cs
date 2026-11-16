@@ -11,6 +11,7 @@ using System.Collections.Generic;
 using System.IO;
 using Document = Lucene.Net.Documents.Document;
 using System.Runtime.CompilerServices;
+using System.Diagnostics;
 using WhatSearch.Models;
 using WhatSearch.Utilities;
 using WhatSearch.Services.Interfaces;
@@ -73,7 +74,24 @@ namespace WhatSearch.Service
 
 
 
+        // 寫入索引的累計時間（Stopwatch ticks），只用來寫日誌
+        long convertTicks;
+        long updateTicks;
+        long commitTicks;
+        long lastRefreshTs = Stopwatch.GetTimestamp();
+        static readonly long RefreshIntervalTicks = Stopwatch.Frequency * 3;
+
         public void Build(IEnumerable<FileInfo> searchDocs)
+        {
+            BuildCore(searchDocs, true);
+        }
+
+        public void BuildBatch(IEnumerable<FileInfo> searchDocs)
+        {
+            BuildCore(searchDocs, false);
+        }
+
+        void BuildCore(IEnumerable<FileInfo> searchDocs, bool commit)
         {
             lock (thisLock)
             {
@@ -82,7 +100,9 @@ namespace WhatSearch.Service
                 {
                     try
                     {
+                        long t0 = Stopwatch.GetTimestamp();
                         string tcFullName = cc.ToTraditionalChinese(fi.FullName);
+                        long t1 = Stopwatch.GetTimestamp();
                         var oDocument = new Document
                         {
                             new StringField(IndexedFileDoc.Columns.Id, fi.FullName, Field.Store.YES),
@@ -95,6 +115,9 @@ namespace WhatSearch.Service
                             new StringField(IndexedFileDoc.Columns.Extension, fi.Extension, Field.Store.YES)
                         };
                         iwriter.UpdateDocument(new Term(IndexedFileDoc.Columns.Id, fi.FullName), oDocument);
+                        long t2 = Stopwatch.GetTimestamp();
+                        convertTicks += t1 - t0;
+                        updateTicks += t2 - t1;
                     }
                     catch (Exception ex)
                     {
@@ -102,7 +125,42 @@ namespace WhatSearch.Service
                         throw;
                     }
                 }
+                long c0 = Stopwatch.GetTimestamp();
+                if (commit)
+                {
+                    CommitAndRefresh();
+                    lastRefreshTs = Stopwatch.GetTimestamp();
+                }
+                else if (c0 - lastRefreshTs >= RefreshIntervalTicks)
+                {
+                    // 批次模式：不 commit，只每隔幾秒重新整理，讓查詢看到掃描進度
+                    searcherManager.MaybeRefreshBlocking();
+                    lastRefreshTs = Stopwatch.GetTimestamp();
+                }
+                commitTicks += Stopwatch.GetTimestamp() - c0;
+            }
+        }
+
+        public void Flush()
+        {
+            lock (thisLock)
+            {
+                InitWriter();
+                long c0 = Stopwatch.GetTimestamp();
                 CommitAndRefresh();
+                lastRefreshTs = Stopwatch.GetTimestamp();
+                commitTicks += lastRefreshTs - c0;
+            }
+        }
+
+        public void GetTimings(out double convertSec, out double updateSec, out double commitSec)
+        {
+            lock (thisLock)
+            {
+                double f = Stopwatch.Frequency;
+                convertSec = convertTicks / f;
+                updateSec = updateTicks / f;
+                commitSec = commitTicks / f;
             }
         }
 
