@@ -2977,6 +2977,10 @@
                         // 正在播放的那首要標成「播放中」（否則播放中再進我的最愛，列上看不出是哪一首）
                         self.vm_markPlaying(self.allItems);
                         self.favView = true;
+                        // 左邊的綠色選取標記也要在正在播的那首（跟一般資料夾回來時一樣）
+                        if (self.nowPlaying.id) {
+                            self.setSelectedItem(self.nowPlaying.id);
+                        }
                         self.newsView = false;
                         self.currentRating = null;
                         self.favTarget = res.data.target;
