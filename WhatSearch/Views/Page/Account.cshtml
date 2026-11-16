@@ -24,7 +24,7 @@
                     // 開頭不能是 // 或 /\（瀏覽器會把反斜線當斜線，變成別的網站），也不能含反斜線與控制字元
                     backUrl: function () {
                         var url = new URLSearchParams(location.search).get('returnUrl');
-                        return url && /^\/(?![\/\\])[^\\\u0000-\u001f]*$/.test(url) ? url : '/page';
+                        return url && /^\/(?![\/\\])[^\\\u0000-\u001f]*$/.test(url) ? url : '/page/';
                     },
                     maxLength: function () {
                         return this.info ? this.info.displayNameMaxLength : 20;
@@ -50,7 +50,7 @@
                         }, 3500);
                     },
                     vm_home: function () {
-                        location.href = '/page';
+                        location.href = '/page/';
                     },
                     vm_back: function () {
                         location.href = this.backUrl;
