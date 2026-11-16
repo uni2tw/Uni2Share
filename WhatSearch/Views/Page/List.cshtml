@@ -820,6 +820,10 @@
                 v-on:click.stop="vm_togglePin(item.id)">
                 <i class="fa-solid fa-thumbtack" :style="pinMap[item.id] ? '' : 'transform:rotate(45deg); opacity:.55;'"></i>
             </div>
+            <div v-if="favView && favTabEff === 'track' && item.type === 'music'" class="fav-btn" title="到這首歌所在的資料夾"
+                v-on:click.stop="vm_goTrackFolder(item)">
+                <i class="fa-solid fa-folder-open" style="color:orange;"></i>
+            </div>
             <div v-if="vm_canFav(item)" class="fav-btn" :class="{'fav-on': vm_isFav(item)}" title="加入最愛"
                 v-on:click.stop="vm_toggleFav(item.type === 'folder' ? 'album' : 'track', item.id)">
                 <i :class="vm_isFav(item) ? 'fa-solid fa-heart' : 'fa-regular fa-heart'"></i>
@@ -2143,6 +2147,30 @@
                     }, 120);
                 },
                 // 播的是 CUE 專輯：回到那張專輯的畫面（不在那個資料夾就先進去，再打開那個 .cue／.flac）
+                // 我的最愛：到這首歌所在的資料夾，並選取、捲到那一首（不會開始播放）
+                vm_goTrackFolder: function (item) {
+                    let p = this.vm_idToPath(item.id);
+                    let i = p.lastIndexOf('/');
+                    if (i <= 0) {
+                        return;
+                    }
+                    let result = this.vm_getFolder(this.vm_pathToId(p.substring(0, i)), true);
+                    Promise.resolve(result).then(() => {
+                        this.setSelectedItem(item.id);
+                        window.setTimeout(() => {
+                            this.$nextTick(() => {
+                                let el = document.querySelector('.selected-item-row');
+                                if (el && el.scrollIntoView) {
+                                    let root = document.documentElement;
+                                    let prev = root.style.scrollBehavior;
+                                    root.style.scrollBehavior = 'auto';
+                                    el.scrollIntoView({ block: 'center' });
+                                    root.style.scrollBehavior = prev;
+                                }
+                            });
+                        }, 120);
+                    });
+                },
                 vm_goPlayingCue: function () {
                     let itemId = this.cuePlayItemId;
                     if (!itemId || !this.cuePlayFolderId) {
