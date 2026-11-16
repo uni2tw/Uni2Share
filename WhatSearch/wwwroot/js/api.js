@@ -45,6 +45,12 @@ api.setFavorite = function(kind, id, fav) {
         fav: fav
     });
 }
+// 自訂最愛單曲的順序：ids = 畫面上單曲由上到下的 id
+api.reorderFavorites = function(ids) {
+    return axios.post('/api/favorites/reorder', {
+        ids: ids
+    });
+}
 // 清除自己最愛裡找不到的項目（資料夾已改名或刪除）
 api.pruneFavorites = function() {
     return axios.post('/api/favorites/prune', {});

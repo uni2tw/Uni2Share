@@ -756,6 +756,23 @@ namespace WhatSearch.WebAPIs
             return new { ok = true };
         }
 
+        /// <summary>自訂「我的最愛」單曲的順序（拖曳排序後呼叫）。ids 是畫面上單曲由上到下的 id；沒列在 ids 裡的最愛（例如找不到的）位置不動</summary>
+        [HttpPost]
+        [Route("api/favorites/reorder")]
+        public dynamic ReorderFavorites([FromBody] FavoriteReorderInputModel model)
+        {
+            if (User.Identity.IsAuthenticated == false)
+            {
+                return Unauthorized();
+            }
+            if (model == null || model.ids == null || model.ids.Count == 0 || model.ids.Count > 5000)
+            {
+                return BadRequest("參數錯誤");
+            }
+            favoriteService.ReorderTracks(User.Identity.Name, model.ids);
+            return new { ok = true };
+        }
+
         /// <summary>
         /// 「我的最愛」清單：先列專輯（最近加入的在前），再列歌曲（依加入順序，等於一份虛擬精選歌單）。
         /// 已被改名/刪除而找不到的項目不列出（資料保留，檔案回來就會再出現），只在訊息裡提示筆數。
@@ -943,6 +960,11 @@ namespace WhatSearch.WebAPIs
         {
             public string id { get; set; }
             public bool pin { get; set; }
+        }
+
+        public class FavoriteReorderInputModel
+        {
+            public List<string> ids { get; set; }
         }
 
         public class FavoriteInputModel

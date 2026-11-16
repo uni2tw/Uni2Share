@@ -19,6 +19,11 @@ namespace WhatSearch.Services
         int RemoveMember(string member);
         /// <summary>一次移除某個會員的多筆最愛（清除找不到的項目用），只寫一次檔；回傳實際移除的筆數</summary>
         int RemoveItems(string member, IEnumerable<string> albumIds, IEnumerable<string> trackIds);
+        /// <summary>
+        /// 依 ids 的順序重排單曲。只動「ids 裡有的、而且確實是最愛」的那些歌：它們原本佔的位置照新順序填回去，
+        /// 其他的（找不到所以畫面上沒列出、或是同時間才新加入的）位置不動。回傳順序是否有變。
+        /// </summary>
+        bool ReorderTracks(string member, IEnumerable<string> ids);
     }
 
     public class FavoriteData
@@ -134,6 +139,55 @@ namespace WhatSearch.Services
                 all.Remove(member);
                 Save();
                 return n;
+            }
+        }
+
+        public bool ReorderTracks(string member, IEnumerable<string> ids)
+        {
+            if (string.IsNullOrEmpty(member) || ids == null)
+            {
+                return false;
+            }
+            lock (thisLock)
+            {
+                FavoriteData data;
+                if (Load().TryGetValue(member, out data) == false)
+                {
+                    return false;
+                }
+                var owned = new HashSet<string>(data.Tracks, StringComparer.Ordinal);
+                var seen = new HashSet<string>(StringComparer.Ordinal);
+                var order = new List<string>();
+                foreach (string id in ids)
+                {
+                    if (id != null && owned.Contains(id) && seen.Add(id))
+                    {
+                        order.Add(id);
+                    }
+                }
+                // 這些歌目前佔的位置（由前到後）
+                var slots = new List<int>();
+                for (int i = 0; i < data.Tracks.Count; i++)
+                {
+                    if (seen.Contains(data.Tracks[i]))
+                    {
+                        slots.Add(i);
+                    }
+                }
+                bool changed = false;
+                for (int k = 0; k < slots.Count; k++)
+                {
+                    if (data.Tracks[slots[k]] != order[k])
+                    {
+                        data.Tracks[slots[k]] = order[k];
+                        changed = true;
+                    }
+                }
+                if (changed)
+                {
+                    Save();
+                }
+                return changed;
             }
         }
 

@@ -327,6 +327,32 @@
         cursor: pointer;
         -webkit-tap-highlight-color: transparent;
     }
+    /* 我的最愛：拖曳排序的把手（只有按住把手才會拖，其他地方照舊點擊／捲動） */
+    .drag-handle {
+        flex: 0 0 auto;
+        width: 30px;
+        height: 44px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: #bbb;
+        font-size: 16px;
+        cursor: grab;
+        touch-action: none;
+        user-select: none;
+        -webkit-user-select: none;
+        -webkit-tap-highlight-color: transparent;
+    }
+    .item-row.dragging {
+        position: relative;
+        z-index: 5;
+        background: #fff;
+        box-shadow: 0 4px 14px rgba(0,0,0,.25);
+        opacity: .95;
+    }
+    .item-row.drag-shift {
+        transition: transform .15s;
+    }
     .fav-btn.fav-on {
         color: #e0245e;
     }
@@ -775,6 +801,10 @@
                 style="display:flex; padding:10px 5px; width:100%; cursor:pointer; min-height:48px; align-items:center;"
                 >
             <a :name="item.id"></a>
+            <div v-if="favView && favTabEff === 'track' && item.type === 'music'" class="drag-handle" title="按住拖曳調整順序"
+                v-on:pointerdown.stop.prevent="vm_dragStart($event, item)" v-on:click.stop>
+                <i class="fa-solid fa-grip-vertical"></i>
+            </div>
             <div style="height:40px;" class="ps-1 pe-2">
                 <i v-if="item.type == 'folder'" class="fa fa-folder-open pull-left"
                     style="font-size:32px;color:orange;"></i>
@@ -1216,6 +1246,7 @@
                     cueNote: '',
                     cueNoteTimer: 0,
                     cuePlayFolderId: '',
+                    dragState: null,
                     cuePlayItemId: '',
                     tierBusy: false,
                     tierProgress: '',
@@ -2147,6 +2178,122 @@
                     }, 120);
                 },
                 // 播的是 CUE 專輯：回到那張專輯的畫面（不在那個資料夾就先進去，再打開那個 .cue／.flac）
+                // ----- 我的最愛：按住把手拖曳排序 -----
+                vm_dragStart: function (e, item) {
+                    if (this.dragState || (e.pointerType === 'mouse' && e.button !== 0)) {
+                        return;
+                    }
+                    let rows = Array.prototype.slice.call(document.querySelectorAll('.item-row'));
+                    let handle = e.currentTarget;
+                    let row = handle.closest('.item-row');
+                    let from = rows.indexOf(row);
+                    if (from === -1 || rows.length < 2) {
+                        return;
+                    }
+                    let sy = window.pageYOffset;
+                    try { handle.setPointerCapture(e.pointerId); } catch (ex) { }
+                    let st = {
+                        item: item, rows: rows, row: row, from: from, to: from, handle: handle, pointerId: e.pointerId,
+                        centers: rows.map(r => { let b = r.getBoundingClientRect(); return b.top + sy + b.height / 2; }),
+                        height: row.getBoundingClientRect().height,
+                        startPageY: e.clientY + sy, clientY: e.clientY, raf: 0
+                    };
+                    this.dragState = st;
+                    row.classList.add('dragging');
+                    rows.forEach(r => { if (r !== row) { r.classList.add('drag-shift'); } });
+                    document.body.style.userSelect = 'none';
+                    st.onMove = ev => { st.clientY = ev.clientY; this.vm_dragUpdate(); };
+                    st.onEnd = ev => this.vm_dragEnd(ev.type === 'pointercancel');
+                    handle.addEventListener('pointermove', st.onMove);
+                    handle.addEventListener('pointerup', st.onEnd);
+                    handle.addEventListener('pointercancel', st.onEnd);
+                    // 拖到畫面上下緣時自動捲動
+                    let tick = () => {
+                        if (this.dragState !== st) { return; }
+                        let h = window.innerHeight;
+                        let speed = 0;
+                        if (st.clientY < 90) { speed = -Math.ceil((90 - st.clientY) / 6); }
+                        else if (st.clientY > h - 90) { speed = Math.ceil((st.clientY - (h - 90)) / 6); }
+                        if (speed !== 0) {
+                            let root = document.documentElement;
+                            let prev = root.style.scrollBehavior;
+                            root.style.scrollBehavior = 'auto';
+                            window.scrollBy(0, speed);
+                            root.style.scrollBehavior = prev;
+                            this.vm_dragUpdate();
+                        }
+                        st.raf = window.requestAnimationFrame(tick);
+                    };
+                    st.raf = window.requestAnimationFrame(tick);
+                },
+                vm_dragUpdate: function () {
+                    let st = this.dragState;
+                    if (!st) { return; }
+                    let dy = (st.clientY + window.pageYOffset) - st.startPageY;
+                    st.row.style.transform = 'translateY(' + dy + 'px)';
+                    let center = st.centers[st.from] + dy;
+                    let to = 0;
+                    st.centers.forEach((c, j) => { if (j !== st.from && c < center) { to++; } });
+                    st.to = to;
+                    st.rows.forEach((r, j) => {
+                        if (j === st.from) { return; }
+                        let shift = 0;
+                        if (to > st.from && j > st.from && j <= to) { shift = -st.height; }
+                        else if (to < st.from && j >= to && j < st.from) { shift = st.height; }
+                        r.style.transform = shift ? 'translateY(' + shift + 'px)' : '';
+                    });
+                },
+                vm_dragEnd: function (cancelled) {
+                    let st = this.dragState;
+                    if (!st) { return; }
+                    this.dragState = null;
+                    window.cancelAnimationFrame(st.raf);
+                    st.handle.removeEventListener('pointermove', st.onMove);
+                    st.handle.removeEventListener('pointerup', st.onEnd);
+                    st.handle.removeEventListener('pointercancel', st.onEnd);
+                    try { st.handle.releasePointerCapture(st.pointerId); } catch (ex) { }
+                    document.body.style.userSelect = '';
+                    st.rows.forEach(r => { r.style.transform = ''; r.classList.remove('dragging', 'drag-shift'); });
+                    if (cancelled || st.to === st.from) {
+                        return;
+                    }
+                    this.vm_favReorder(st.from, st.to);
+                },
+                // 把畫面上第 from 首移到第 to 的位置，存到伺服器（失敗就還原）
+                vm_favReorder: function (from, to) {
+                    let tracks = this.allItems.filter(t => t.type === 'music');
+                    let others = this.allItems.filter(t => t.type !== 'music');
+                    if (from < 0 || from >= tracks.length || to < 0 || to >= tracks.length) {
+                        return;
+                    }
+                    let backup = this.allItems;
+                    let moved = tracks.splice(from, 1)[0];
+                    tracks.splice(to, 0, moved);
+                    this.allItems = others.concat(tracks);
+                    this.vm_favRebuildQueue(tracks);
+                    api.reorderFavorites(tracks.map(t => t.id)).catch(err => {
+                        this.allItems = backup;
+                        this.vm_favRebuildQueue(backup.filter(t => t.type === 'music'));
+                        let st = err && err.response ? err.response.status : 0;
+                        if (st === 401) {
+                            this.redirectToLogin('');
+                        } else {
+                            alert('儲存順序失敗，請稍後再試');
+                        }
+                    });
+                },
+                // 正在連續播放「我的最愛」時，下一首要跟著新順序走
+                vm_favRebuildQueue: function (tracks) {
+                    if (!this.playQueueGain || !this.nowPlaying.id) {
+                        return;
+                    }
+                    let idx = tracks.findIndex(t => t.id === this.nowPlaying.id);
+                    if (idx === -1) {
+                        return;
+                    }
+                    this.playQueue = tracks;
+                    this.playQueueIndex = idx;
+                },
                 // 我的最愛：到這首歌所在的資料夾，並選取、捲到那一首（不會開始播放）
                 vm_goTrackFolder: function (item) {
                     let p = this.vm_idToPath(item.id);
