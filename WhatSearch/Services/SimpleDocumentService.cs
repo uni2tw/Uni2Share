@@ -23,6 +23,7 @@ namespace WhatSearch.Services
         {
             Stopwatch total = Stopwatch.StartNew();
             int remaining = startFolders.Count;
+            BatchMode = remaining > 0;
             foreach (var folder in startFolders)
             {
                 string folderPath = folder.Path;
@@ -35,9 +36,18 @@ namespace WhatSearch.Services
                     }
                     finally
                     {
+                        try
+                        {
+                            FlushIndex();
+                        }
+                        catch (Exception ex)
+                        {
+                            logger.Warn(ex, "索引掃描：最後的 commit 失敗 {0}", folderPath);
+                        }
                         logger.Info("索引掃描：根目錄 {0} 掃完，耗時 {1:F1} 秒", folderPath, root.Elapsed.TotalSeconds);
                         if (Interlocked.Decrement(ref remaining) == 0)
                         {
+                            BatchMode = false;
                             LogScanSummary(total);
                         }
                     }

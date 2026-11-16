@@ -31,6 +31,14 @@ namespace WhatSearch
         long _scanDirs;
         long _scanFiles;
 
+        /// <summary>啟動掃描進行中：寫索引只寫入、不 commit（掃完由 FlushIndex 一次 commit），速度差很多</summary>
+        protected volatile bool BatchMode;
+
+        protected void FlushIndex()
+        {
+            search.Flush();
+        }
+
         protected void AddWalkTicks(long ticks)
         {
             Interlocked.Add(ref _scanWalkTicks, ticks);
@@ -43,7 +51,14 @@ namespace WhatSearch
                 .Where(t => t.Attributes.HasFlag(FileAttributes.Hidden) == false).ToArray();
             AddWalkTicks(sw.ElapsedTicks);
             sw.Restart();
-            search.Build(fileInfos);
+            if (BatchMode)
+            {
+                search.BuildBatch(fileInfos);
+            }
+            else
+            {
+                search.Build(fileInfos);
+            }
             Interlocked.Add(ref _scanBuildTicks, sw.ElapsedTicks);
             Interlocked.Increment(ref _scanDirs);
             Interlocked.Add(ref _scanFiles, fileInfos.Length);
@@ -53,10 +68,13 @@ namespace WhatSearch
         protected void LogScanSummary(Stopwatch total)
         {
             double f = Stopwatch.Frequency;
-            scanLogger.Info("索引掃描完成：{0} 個資料夾、{1} 個檔案、索引共 {2} 筆，總耗時 {3:F1} 秒（累計：走訪檔案系統 {4:F1} 秒、寫入索引 {5:F1} 秒；多個根目錄同時掃描時，累計可能大於總耗時）",
+            double convertSec, updateSec, commitSec;
+            search.GetTimings(out convertSec, out updateSec, out commitSec);
+            scanLogger.Info("索引掃描完成：{0} 個資料夾、{1} 個檔案、索引共 {2} 筆，總耗時 {3:F1} 秒（累計：走訪檔案系統 {4:F1} 秒、寫入索引 {5:F1} 秒〔簡繁轉換 {6:F1}、寫入文件 {7:F1}、commit／重新整理 {8:F1}〕；多個根目錄同時掃描時，累計可能大於總耗時）",
                 Interlocked.Read(ref _scanDirs), Interlocked.Read(ref _scanFiles), search.DocCount,
                 total.Elapsed.TotalSeconds,
-                Interlocked.Read(ref _scanWalkTicks) / f, Interlocked.Read(ref _scanBuildTicks) / f);
+                Interlocked.Read(ref _scanWalkTicks) / f, Interlocked.Read(ref _scanBuildTicks) / f,
+                convertSec, updateSec, commitSec);
         }
 
         protected void BuildIndex(FileInfo fileInfo)
