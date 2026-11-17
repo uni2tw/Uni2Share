@@ -217,7 +217,7 @@ namespace WhatSearch.WebAPIs
         [UserAuthorize]
         public dynamic GetFile(string pathInfo, [FromQuery] bool preview = false, [FromQuery] bool cover = false,
             [FromQuery] bool subtitle = false, [FromQuery] bool subtitleTracks = false, [FromQuery] int track = 0,
-            [FromQuery] bool mp3 = false)
+            [FromQuery] bool mp3 = false, [FromQuery] bool download = false)
         {
             string targetPath;
             if (PathUtility.TryGetAbsolutePath("/" + pathInfo, out targetPath) == false)
@@ -331,6 +331,11 @@ namespace WhatSearch.WebAPIs
                     return new { type = "md", html = Markdown.ToHtml(text, TextPreviewMarkdownPipeline) };
                 }
                 return new { type = "txt", text };
+            }
+            if (download)
+            {
+                // 下載：帶檔名（Content-Disposition: attachment），仍開啟 Range，瀏覽器下載中斷後可以續傳
+                return this.PhysicalFile(targetPath, MimeTypeMap.GetMimeType(fileExt), Path.GetFileName(targetPath), true);
             }
             return this.PhysicalFile(targetPath, MimeTypeMap.GetMimeType(fileExt), true);
         }

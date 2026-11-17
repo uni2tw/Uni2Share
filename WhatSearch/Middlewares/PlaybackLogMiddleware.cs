@@ -124,9 +124,15 @@ namespace WhatSearch.Middlewares
             {
                 level = LogLevel.Info;
             }
+            // 下載（?download=true）很少發生又值得留意（有沒有完成、有沒有中斷續傳），一律提升到 Info
+            bool isDownload = IsDownloadRequest(req);
+            if (isDownload && level < LogLevel.Info)
+            {
+                level = LogLevel.Info;
+            }
 
             PlaybackLogger.Log(level,
-                "play {0}{1} {2} {3} {4} range={5} -> {6} {7} len={8} time={9}ms {10}{11}{12}",
+                "{13} {0}{1} {2} {3} {4} range={5} -> {6} {7} len={8} time={9}ms {10}{11}{12}",
                 ip,
                 string.IsNullOrEmpty(forwarded) ? string.Empty : " (xff " + forwarded + ")",
                 DescribeDevice(ua),
@@ -139,7 +145,15 @@ namespace WhatSearch.Middlewares
                 elapsedMs,
                 aborted ? "ABORTED" : (error != null ? "ERROR:" + error : "ok"),
                 rate,
-                string.IsNullOrEmpty(ua) ? string.Empty : " ua=\"" + Shorten(ua, 90) + "\"");
+                string.IsNullOrEmpty(ua) ? string.Empty : " ua=\"" + Shorten(ua, 90) + "\"",
+                isDownload ? "download" : "play");
+        }
+
+        // 使用者按「下載」的請求（?download=true）：日誌開頭標成 download，和一般播放分開
+        static bool IsDownloadRequest(HttpRequest req)
+        {
+            string v = req.Query["download"];
+            return string.Equals(v, "true", StringComparison.OrdinalIgnoreCase);
         }
 
         // FLAC 轉好的 MP3 快取版（?mp3=true）：路徑還是 .flac，日誌要標出來才分得出播的是哪一種
