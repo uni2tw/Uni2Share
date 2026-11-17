@@ -646,6 +646,10 @@
                 <i class="fa fa-triangle-exclamation"></i> 你的瀏覽器可能無法正常播放這部：{{ mediaHintWarnings.join('；') }}
                 <div class="media-hint-detail">{{ mediaHintDetail }}（這是依你目前的瀏覽器判斷的提示，仍可點進去試播）</div>
             </div>
+            <a v-if="mediaHintDownloadUrl" :href="mediaHintDownloadUrl" download class="btn btn-sm btn-outline-secondary"
+                style="flex:0 0 auto; white-space:nowrap;" :title="'下載 ' + mediaInfo.file + ' 用本機播放器看；進度與取消請看瀏覽器的下載列'">
+                <i class="fa fa-download"></i> 下載
+            </a>
             <button v-if="isAdmin && currentRating && currentRating.kind === 'anime' && !currentRating.unplayable" type="button" class="btn btn-sm btn-outline-danger"
                 style="flex:0 0 auto; white-space:nowrap;" title="確認這部無法播放，標註給所有人看" v-on:click="vm_toggleUnplayable()">
                 <i class="fa fa-ban"></i> 無法播放
@@ -983,7 +987,7 @@
                     <i class="fa fa-triangle-exclamation" style="font-size:2rem; color:#ffc107;"></i>
                     <div style="max-width:90%;">{{ nowPlayingVideo.error }}</div>
                     <div style="display:flex; gap:8px; flex-wrap:wrap; justify-content:center;">
-                        <a :href="nowPlayingVideo.url" download class="btn btn-sm btn-outline-light">
+                        <a :href="vm_downloadUrl(nowPlayingVideo.url)" download class="btn btn-sm btn-outline-light">
                             <i class="fa fa-download"></i> 下載檔案
                         </a>
                         <button v-if="isAdmin && currentRating && currentRating.kind === 'anime' && !currentRating.unplayable" type="button" class="btn btn-sm btn-outline-warning" v-on:click="vm_toggleUnplayable()">
@@ -1523,6 +1527,15 @@
                         warnings.push('預設音軌 ' + main.label + ' 可能沒有聲音');
                     }
                     return warnings;
+                },
+                // 提示列上的「下載」：對應提示所檢查的那個 MKV（資料夾裡的第一個），找不到對應項目就不顯示
+                mediaHintDownloadUrl: function() {
+                    let info = this.mediaInfo;
+                    if (!info || !info.file) {
+                        return '';
+                    }
+                    let it = this.allItems.find(t => t.type === 'video' && t.title === info.file);
+                    return it && it.get_url ? this.vm_downloadUrl(it.get_url) : '';
                 },
                 mediaHintDetail: function() {
                     let info = this.mediaInfo;
@@ -4055,6 +4068,10 @@
                         ' size=' + v.videoWidth + 'x' + v.videoHeight +
                         ' h264=' + can('video/mp4; codecs="avc1.640028, mp4a.40.2"') +
                         ' hevc=' + can('video/mp4; codecs="hvc1.1.6.L120.90, mp4a.40.2"'));
+                },
+                // 下載網址：加 download=true，伺服器會帶檔名並在日誌標成 download
+                vm_downloadUrl: function (url) {
+                    return url ? url + (url.indexOf('?') === -1 ? '?' : '&') + 'download=true' : url;
                 },
                 // 回報給伺服器寫進日誌（30 秒內最多一次，失敗不影響播放）
                 vm_reportPlayDiag: function (evt, detail) {
