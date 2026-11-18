@@ -51,6 +51,16 @@ api.reorderFavorites = function(ids) {
         ids: ids
     });
 }
+// 回報聽過一首（聽滿 30 秒或過半才呼叫）；失敗不打擾使用者，呼叫端自行忽略
+api.recordPlay = function(id, title, artist, album, duration) {
+    return axios.post('/api/plays', {
+        id: id,
+        title: title || '',
+        artist: artist || '',
+        album: album || '',
+        duration: duration || 0
+    });
+}
 // 清除自己最愛裡找不到的項目（資料夾已改名或刪除）
 api.pruneFavorites = function() {
     return axios.post('/api/favorites/prune', {});

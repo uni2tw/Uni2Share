@@ -28,6 +28,7 @@ namespace WhatSearch.WebAPIs
         IFolderIdManager fimgr = Ioc.Get<IFolderIdManager>();
         IMainService mainService = Ioc.Get<IMainService>();
         IFavoriteService favoriteService = Ioc.Get<IFavoriteService>();
+        IPlayStatService playStatService = Ioc.Get<IPlayStatService>();
         ILoudnessService loudnessService = Ioc.Get<ILoudnessService>();
         ITranscodeService transcodeService = Ioc.Get<ITranscodeService>();
         IRatingService ratingService = Ioc.Get<IRatingService>();
@@ -761,6 +762,24 @@ namespace WhatSearch.WebAPIs
             return new { ok = true };
         }
 
+        /// <summary>
+        /// 回報「聽過一首」（前端實際聽滿 30 秒或過半才呼叫，一次播放只報一次）。只記登入會員，寫進 plays.jsonl 供長期統計。
+        /// </summary>
+        [HttpPost]
+        [Route("api/plays")]
+        public dynamic RecordPlay([FromBody] PlayInputModel model)
+        {
+            if (User.Identity.IsAuthenticated == false)
+            {
+                return Unauthorized();
+            }
+            if (model == null || playStatService.Record(User.Identity.Name, model.id, model.title, model.artist, model.album, model.duration) == false)
+            {
+                return BadRequest("參數錯誤");
+            }
+            return new { ok = true };
+        }
+
         /// <summary>自訂「我的最愛」單曲的順序（拖曳排序後呼叫）。ids 是畫面上單曲由上到下的 id；沒列在 ids 裡的最愛（例如找不到的）位置不動</summary>
         [HttpPost]
         [Route("api/favorites/reorder")]
@@ -965,6 +984,15 @@ namespace WhatSearch.WebAPIs
         {
             public string id { get; set; }
             public bool pin { get; set; }
+        }
+
+        public class PlayInputModel
+        {
+            public string id { get; set; }
+            public string title { get; set; }
+            public string artist { get; set; }
+            public string album { get; set; }
+            public double duration { get; set; }
         }
 
         public class FavoriteReorderInputModel

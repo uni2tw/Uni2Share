@@ -1307,6 +1307,8 @@
                     favActionsTimer: null,
                     favPress: null,
                     albumPress: null,
+                    // 這次播放的「聽過」累計：{ id, last（上次 currentTime）, listened（實際聽的秒數）, reported }
+                    playStat: null,
                     favSwallowClickUntil: 0,
                     cuePlayItemId: '',
                     tierBusy: false,
@@ -4630,6 +4632,7 @@
                         window.audio = new Audio();
                         window.audio.addEventListener('timeupdate', t => {
                             self.nowPlaying.currentTime = window.audio.currentTime;
+                            self.vm_playStatTick();
                             let d = window.audio.duration;
                             if ('mediaSession' in navigator && navigator.mediaSession.setPositionState && isFinite(d) && d > 0) {
                                 try {
@@ -4764,11 +4767,41 @@
                     this.nowPlaying.format = /[?&]mp3=true(&|$)/.test(audioURL) ? 'MP3（轉檔）' : (/\.flac(\?|$)/i.test(audioURL) ? 'FLAC 原檔' : '');
                     this.nowPlaying.currentTime = 0;
                     this.nowPlaying.duration = 0;
+                    // 每次開始播都重新計算「聽過」（同一首重播、單曲循環也各算一次）
+                    this.playStat = { id: id, last: null, listened: 0, reported: false };
                     this.vm_setMediaSessionMode('audio');
                     this.vm_updateMediaSession();
 
                     console.log('play');
                     this.vm_scrollToPlaying();
+                },
+                // 累計實際聽的時間，聽滿 30 秒（曲子短於 60 秒就是過半）回報一次。
+                // 只累計正常往前走的時間：拖進度條、剛換歌 currentTime 跳動的那一格都不算，所以直接拖到結尾不會被當成聽過
+                vm_playStatTick: function () {
+                    let st = this.playStat, a = window.audio;
+                    if (!st || st.reported || !a || a.paused || st.id !== this.nowPlaying.id) {
+                        return;
+                    }
+                    let now = a.currentTime;
+                    if (st.last !== null) {
+                        let delta = now - st.last;
+                        // 手機鎖屏時 timeupdate 會變稀疏（可能數秒才一次），所以容許 5 秒以內的間隔；更大的跳動視為拖進度條
+                        if (delta > 0 && delta < 5) {
+                            st.listened += delta;
+                        }
+                    }
+                    st.last = now;
+                    let d = a.duration;
+                    let need = (isFinite(d) && d > 0) ? Math.min(30, d / 2) : 30;
+                    if (st.listened < need) {
+                        return;
+                    }
+                    st.reported = true;
+                    if (this.isLoggedIn === false) {
+                        return;
+                    }
+                    api.recordPlay(st.id, this.nowPlaying.title, this.nowPlaying.artist, this.nowPlaying.album,
+                        (isFinite(d) && d > 0) ? d : 0).catch(() => { });
                 },
                 vm_seekInput: function (evt) {
                     this.seekingTime = parseFloat(evt.target.value);
