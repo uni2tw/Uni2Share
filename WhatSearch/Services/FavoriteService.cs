@@ -4,6 +4,7 @@ using System.IO;
 using System.Linq;
 using System.Text.Json.Serialization;
 using NLog;
+using WhatSearch.Core;
 using WhatSearch.Utility;
 using WhatSearch.Utilities;
 
@@ -24,6 +25,13 @@ namespace WhatSearch.Services
         /// 其他的（找不到所以畫面上沒列出、或是同時間才新加入的）位置不動。回傳順序是否有變。
         /// </summary>
         bool ReorderTracks(string member, IEnumerable<string> ids);
+        /// <summary>
+        /// 資料夾改名／搬移後，把所有會員最愛裡「在舊路徑底下」的專輯與單曲 id 改成新路徑（id 是相對路徑的 Base64）。
+        /// oldRel／newRel 是 /分享名/資料夾 形式。新 id 已經在最愛裡就只留一筆。回傳改了幾筆
+        /// </summary>
+        int MoveFolder(string oldRel, string newRel);
+        /// <summary>監看所有分享根的資料夾改名，讓最愛跟著改名</summary>
+        void StartWatch();
     }
 
     public class FavoriteData
@@ -188,6 +196,139 @@ namespace WhatSearch.Services
                     Save();
                 }
                 return changed;
+            }
+        }
+
+        public int MoveFolder(string oldRel, string newRel)
+        {
+            oldRel = (oldRel ?? string.Empty).Replace('\\', '/').TrimEnd('/');
+            newRel = (newRel ?? string.Empty).Replace('\\', '/').TrimEnd('/');
+            if (oldRel.Length == 0 || newRel.Length == 0 || string.Equals(oldRel, newRel, StringComparison.Ordinal))
+            {
+                return 0;
+            }
+            lock (thisLock)
+            {
+                int changed = 0;
+                foreach (var kv in Load())
+                {
+                    changed += MoveIds(kv.Value.Albums, oldRel, newRel);
+                    changed += MoveIds(kv.Value.Tracks, oldRel, newRel);
+                }
+                if (changed > 0)
+                {
+                    Save();
+                }
+                return changed;
+            }
+        }
+
+        // 把 list 裡路徑在 oldRel 之下（含自己）的 id 換成新路徑，順序不變；換完已經存在的 id 只留一筆
+        static int MoveIds(List<string> list, string oldRel, string newRel)
+        {
+            int changed = 0;
+            for (int i = 0; i < list.Count; i++)
+            {
+                string rel;
+                try
+                {
+                    rel = Helper.DecodeUrlBase64(list[i]).Replace('\\', '/');
+                }
+                catch (Exception)
+                {
+                    continue;
+                }
+                string tail = null;
+                if (string.Equals(rel.TrimEnd('/'), oldRel, StringComparison.OrdinalIgnoreCase))
+                {
+                    tail = rel.Substring(oldRel.Length);
+                }
+                else if (rel.StartsWith(oldRel + "/", StringComparison.OrdinalIgnoreCase))
+                {
+                    tail = rel.Substring(oldRel.Length);
+                }
+                if (tail == null)
+                {
+                    continue;
+                }
+                string newId = Helper.EncodeUrlBase64(newRel + tail);
+                if (newId == list[i])
+                {
+                    continue;
+                }
+                changed++;
+                if (list.Contains(newId))
+                {
+                    list.RemoveAt(i);
+                    i--;
+                }
+                else
+                {
+                    list[i] = newId;
+                }
+            }
+            return changed;
+        }
+
+        // ---------- 資料夾改名：最愛跟著走 ----------
+
+        static readonly List<FileSystemWatcher> watchers = new List<FileSystemWatcher>();
+
+        public void StartWatch()
+        {
+            var config = Ioc.GetConfig();
+            if (config.Folders == null)
+            {
+                return;
+            }
+            foreach (FolderConfig f in config.Folders.Where(t => t != null && string.IsNullOrEmpty(t.Path) == false))
+            {
+                try
+                {
+                    var w = new FileSystemWatcher(f.Path)
+                    {
+                        IncludeSubdirectories = true,
+                        NotifyFilter = NotifyFilters.DirectoryName,
+                        InternalBufferSize = 64 * 1024
+                    };
+                    string title = f.Title;
+                    w.Renamed += (s, e) => OnFolderRenamed(e.OldFullPath, e.FullPath);
+                    w.Error += (s, e) => logger.Warn("最愛：{0} 的檔案監看出錯（{1}），資料夾改名可能沒有跟上", title, e.GetException() == null ? "?" : e.GetException().Message);
+                    w.EnableRaisingEvents = true;
+                    watchers.Add(w);
+                }
+                catch (Exception ex)
+                {
+                    logger.Warn("最愛：{0} 的檔案監看啟動失敗（{1}），資料夾改名不會自動跟上", f.Title, ex.Message);
+                }
+            }
+            logger.Info("最愛：監看 {0} 個分享根的資料夾改名", watchers.Count);
+        }
+
+        // 事件在背景執行緒，沒接住的例外會讓整個程式結束
+        void OnFolderRenamed(string oldPath, string newPath)
+        {
+            try
+            {
+                if (Directory.Exists(newPath) == false)
+                {
+                    return;
+                }
+                string oldRel, newRel;
+                if (PathUtility.TryGetRelPath(oldPath.TrimEnd('\\', '/'), out oldRel) == false ||
+                    PathUtility.TryGetRelPath(newPath.TrimEnd('\\', '/'), out newRel) == false)
+                {
+                    return;
+                }
+                int n = MoveFolder(oldRel, newRel);
+                if (n > 0)
+                {
+                    logger.Info("最愛：資料夾改名，{0} 筆最愛從「{1}」跟到「{2}」", n, oldRel, newRel);
+                }
+            }
+            catch (Exception ex)
+            {
+                logger.Warn(ex, "最愛：處理資料夾改名失敗：{0} → {1}", oldPath, newPath);
             }
         }
 
