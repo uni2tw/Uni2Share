@@ -780,6 +780,22 @@ namespace WhatSearch.WebAPIs
             return new { ok = true };
         }
 
+        /// <summary>目前會員的聽歌統計。days：最近幾天（7／30／365），0 或沒帶是全部</summary>
+        [HttpGet]
+        [Route("api/plays/stats")]
+        public dynamic GetPlayStats([FromQuery] int days = 0)
+        {
+            if (User.Identity.IsAuthenticated == false)
+            {
+                return Unauthorized();
+            }
+            if (days < 0 || days > 3650)
+            {
+                days = 0;
+            }
+            return playStatService.GetStats(User.Identity.Name, days);
+        }
+
         /// <summary>自訂「我的最愛」單曲的順序（拖曳排序後呼叫）。ids 是畫面上單曲由上到下的 id；沒列在 ids 裡的最愛（例如找不到的）位置不動</summary>
         [HttpPost]
         [Route("api/favorites/reorder")]

@@ -61,6 +61,10 @@ api.recordPlay = function(id, title, artist, album, duration) {
         duration: duration || 0
     });
 }
+// 聽歌統計；days：7／30／365，0 是全部
+api.playStats = function(days) {
+    return axios.get('/api/plays/stats', { params: { days: days || 0 } });
+}
 // 清除自己最愛裡找不到的項目（資料夾已改名或刪除）
 api.pruneFavorites = function() {
     return axios.post('/api/favorites/prune', {});

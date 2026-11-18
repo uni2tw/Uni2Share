@@ -334,6 +334,14 @@
     }
     .album-copy-btn { border: 0; background: transparent; color: #aaa; padding: 0 6px; font-size: 14px; line-height: 1; vertical-align: middle; }
     .album-copy-btn:hover { color: #198754; }
+    .stat-row { display: flex; align-items: center; gap: 10px; padding: 7px 4px; border-bottom: 1px solid #eee; }
+    .stat-click { cursor: pointer; }
+    .stat-click:hover { background: #f3f8f5; }
+    .stat-rank { width: 22px; text-align: right; color: #999; font-size: 13px; flex: 0 0 auto; }
+    .stat-main { flex: 1 1 auto; min-width: 0; }
+    .stat-title { font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .stat-sub { font-size: 12px; color: #888; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .stat-count { flex: 0 0 auto; font-size: 13px; font-weight: bold; color: #198754; }
     .drag-handle {
         flex: 0 0 auto;
         width: 30px;
@@ -567,6 +575,9 @@
                     </button>
                     <button v-if="isLoggedIn" type="button" v-on:click.stop="vm_menuAction(vm_showFavorites)">
                         <i class="fa-solid fa-heart"></i> 我的最愛
+                    </button>
+                    <button v-if="isLoggedIn" type="button" v-on:click.stop="vm_menuAction(vm_openPlayStats)">
+                        <i class="fa fa-chart-simple"></i> 聽歌統計
                     </button>
                     <a v-if="isAdmin" href="/admin"><i class="fa fa-user-shield"></i> 管理<span v-if="alertUnread > 0" class="news-count">{{ alertUnread > 99 ? '99+' : alertUnread }}</span></a>
                     <a v-if="isLoggedIn" :href="accountHref()"><i class="fa fa-user"></i> 我的帳號</a>
@@ -1089,6 +1100,71 @@
         </div>
     </div>
 
+    <div class="lightbox-overlay" v-if="playStats" v-on:click.self="playStats = null">
+        <div class="lightbox-overlay-content" style="background:#fff; color:#222; border-radius:8px; padding:14px 16px; max-width:560px; max-height:88vh; overflow-y:auto;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                <div style="font-weight:bold;"><i class="fa fa-chart-simple"></i> 聽歌統計</div>
+                <button type="button" class="btn btn-sm btn-outline-secondary" v-on:click="playStats = null"><i class="fa fa-times"></i></button>
+            </div>
+            <div style="display:flex; gap:6px; flex-wrap:wrap; margin-bottom:8px;">
+                <button v-for="r in playStatRanges" :key="r.days" type="button" class="btn btn-sm"
+                    :class="playStats.days === r.days ? 'btn-success' : 'btn-outline-success'"
+                    v-on:click="vm_loadPlayStats(r.days)">{{ r.text }}</button>
+            </div>
+            <div v-if="playStats.loading" style="padding:24px; text-align:center; color:#888;"><i class="fa fa-spinner fa-spin"></i> 載入中</div>
+            <div v-else-if="playStats.error" style="padding:24px; text-align:center; color:#b02a37;">{{ playStats.error }}</div>
+            <template v-else-if="playStats.data">
+                <div v-if="playStats.data.plays === 0" style="padding:24px 8px; text-align:center; color:#888;">
+                    <template v-if="playStats.data.since">這段時間內沒有聽歌紀錄。<br />（從 {{ playStats.data.since.substring(0, 10) }} 開始記錄）</template>
+                    <template v-else>還沒有紀錄。<br />登入後聽歌，每首聽滿 30 秒（短曲過半）就會記一次。</template>
+                </div>
+                <template v-else>
+                    <div style="font-size:14px; margin-bottom:2px;">
+                        共聽 <b>{{ playStats.data.plays }}</b> 次 · <b>{{ playStats.data.tracks }}</b> 首不同的歌 · <b>{{ playStats.data.albums }}</b> 個專輯／資料夾
+                    </div>
+                    <div style="font-size:12px; color:#888; margin-bottom:8px;">
+                        曲目長度加總約 {{ vm_statHours(playStats.data.seconds) }}（沒聽完的也以整首計）· 從 {{ playStats.data.since.substring(0, 10) }} 開始記錄
+                    </div>
+                    <div style="display:flex; gap:6px; flex-wrap:wrap; margin-bottom:6px;">
+                        <button v-for="t in playStatTabs" :key="t.key" type="button" class="btn btn-sm"
+                            :class="playStats.tab === t.key ? 'btn-secondary' : 'btn-outline-secondary'"
+                            v-on:click="playStats.tab = t.key">{{ t.text }}</button>
+                    </div>
+                    <template v-if="playStats.tab === 'tracks'">
+                        <div v-for="(t, i) in playStats.data.topTracks" :key="t.id" class="stat-row" :class="{'stat-click': !!t.folderId}" v-on:click="vm_statGo(t.folderId)">
+                            <span class="stat-rank">{{ i + 1 }}</span>
+                            <div class="stat-main">
+                                <div class="stat-title">{{ t.title }}</div>
+                                <div class="stat-sub">{{ [t.artist, t.album].filter(x => x).join(' · ') }}<span v-if="t.artist || t.album"> · </span>最近 {{ vm_statTime(t.last) }}</div>
+                            </div>
+                            <span class="stat-count">{{ t.count }} 次</span>
+                        </div>
+                    </template>
+                    <template v-else-if="playStats.tab === 'albums'">
+                        <div v-for="(a, i) in playStats.data.topAlbums" :key="(a.folderId || a.name) + i" class="stat-row" :class="{'stat-click': !!a.folderId}" v-on:click="vm_statGo(a.folderId)">
+                            <span class="stat-rank">{{ i + 1 }}</span>
+                            <div class="stat-main">
+                                <div class="stat-title">{{ a.name }}</div>
+                                <div class="stat-sub">{{ a.tracks }} 首不同的歌 · 最近 {{ vm_statTime(a.last) }}</div>
+                            </div>
+                            <span class="stat-count">{{ a.count }} 次</span>
+                        </div>
+                    </template>
+                    <template v-else>
+                        <div v-for="(t, i) in playStats.data.recent" :key="i" class="stat-row" :class="{'stat-click': !!t.folderId}" v-on:click="vm_statGo(t.folderId)">
+                            <div class="stat-main">
+                                <div class="stat-title">{{ t.title }}</div>
+                                <div class="stat-sub">{{ [t.artist, t.album].filter(x => x).join(' · ') }}</div>
+                            </div>
+                            <span class="stat-count" style="font-weight:normal; color:#888;">{{ vm_statTime(t.last) }}</span>
+                        </div>
+                    </template>
+                    <div style="font-size:12px; color:#999; margin-top:8px;">點一列會跳到那首歌（專輯）所在的資料夾。</div>
+                </template>
+            </template>
+        </div>
+    </div>
+
     <div class="lightbox-overlay" v-if="noticeDialog">
         <div class="lightbox-overlay-content" style="background:#fff; color:#222; border-radius:8px; padding:14px 16px; max-width:420px;">
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
@@ -1293,6 +1369,14 @@
                     copyMsg: '',
                     copyDialog: null,
                     noticeDialog: null,
+                    // 聽歌統計視窗：{ days, tab, loading, error, data }；null 是關閉
+                    playStats: null,
+                    playStatRanges: [
+                        { days: 7, text: '7 天' }, { days: 30, text: '30 天' }, { days: 365, text: '一年' }, { days: 0, text: '全部' }
+                    ],
+                    playStatTabs: [
+                        { key: 'tracks', text: '常聽曲目' }, { key: 'albums', text: '常聽專輯' }, { key: 'recent', text: '最近聽過' }
+                    ],
                     // 一般會員點 CUE／FLAC 開的「拆軌專輯」視窗（暫存拆軌）；playQueueCueKey 是目前播放佇列屬於哪張暫存專輯
                     cueAlbum: null,
                     cueAlbumTimer: 0,
@@ -2999,6 +3083,66 @@
                         st.saving = false;
                         st.error = (err.response && typeof err.response.data === 'string' && err.response.data) || '儲存失敗，請稍後再試';
                     });
+                },
+                vm_openPlayStats: function () {
+                    let days = 30;
+                    try { let s = parseInt(window.localStorage.getItem('playStatDays')); if (this.playStatRanges.some(r => r.days === s)) { days = s; } } catch (e) { }
+                    this.playStats = { days: days, tab: 'tracks', loading: true, error: '', data: null };
+                    this.vm_loadPlayStats(days);
+                },
+                vm_loadPlayStats: function (days) {
+                    let st = this.playStats;
+                    if (!st) {
+                        return;
+                    }
+                    st.days = days;
+                    st.loading = true;
+                    st.error = '';
+                    try { window.localStorage.setItem('playStatDays', String(days)); } catch (e) { }
+                    api.playStats(days).then(res => {
+                        if (this.playStats === st && st.days === days) {
+                            st.data = res.data;
+                            st.loading = false;
+                        }
+                    }).catch(err => {
+                        if (err && err.response && err.response.status === 401) {
+                            this.redirectToLogin('');
+                            return;
+                        }
+                        if (this.playStats === st && st.days === days) {
+                            st.error = '載入失敗，請稍後再試';
+                            st.loading = false;
+                        }
+                    });
+                },
+                // 曲目長度加總：不到 1 小時顯示分鐘
+                vm_statHours: function (sec) {
+                    if (sec < 3600) {
+                        return Math.round(sec / 60) + ' 分鐘';
+                    }
+                    return (sec / 3600).toFixed(1) + ' 小時';
+                },
+                // 2026-11-18T21:03:00 → 今天 21:03／昨天 21:03／11/16 21:03／2025/11/16
+                vm_statTime: function (text) {
+                    let m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}:\d{2})/.exec(text || '');
+                    if (!m) {
+                        return '';
+                    }
+                    let d = new Date(+m[1], +m[2] - 1, +m[3]);
+                    let today = new Date(); today.setHours(0, 0, 0, 0);
+                    let diff = Math.round((today - d) / 86400000);
+                    if (diff === 0) { return '今天 ' + m[4]; }
+                    if (diff === 1) { return '昨天 ' + m[4]; }
+                    if (+m[1] === today.getFullYear()) { return m[2] + '/' + m[3] + ' ' + m[4]; }
+                    return m[1] + '/' + m[2] + '/' + m[3];
+                },
+                // 跳到曲目／專輯所在的資料夾（CUE 曲目沒有資料夾）
+                vm_statGo: function (folderId) {
+                    if (!folderId) {
+                        return;
+                    }
+                    this.playStats = null;
+                    this.vm_getFolder(folderId, true);
                 },
                 vm_toast: function (msg) {
                     this.copyMsg = msg;
