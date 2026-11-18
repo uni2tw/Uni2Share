@@ -223,36 +223,46 @@ namespace WhatSearch.Services
             }
         }
 
+        /// <summary>
+        /// id（相對路徑的 Base64）若在 oldRel 之下（含自己），回傳換成 newRel 之後的新 id；不在底下、解不開或沒變就回 null。
+        /// 邊界安全：oldRel 是 /A 時 /A2 不會被當成在底下。播放紀錄改名跟隨也用這個。
+        /// </summary>
+        public static string RemapId(string id, string oldRel, string newRel)
+        {
+            string rel;
+            try
+            {
+                rel = Helper.DecodeUrlBase64(id).Replace('\\', '/');
+            }
+            catch (Exception)
+            {
+                return null;
+            }
+            string tail = null;
+            if (string.Equals(rel.TrimEnd('/'), oldRel, StringComparison.OrdinalIgnoreCase))
+            {
+                tail = rel.Substring(oldRel.Length);
+            }
+            else if (rel.StartsWith(oldRel + "/", StringComparison.OrdinalIgnoreCase))
+            {
+                tail = rel.Substring(oldRel.Length);
+            }
+            if (tail == null)
+            {
+                return null;
+            }
+            string newId = Helper.EncodeUrlBase64(newRel + tail);
+            return newId == id ? null : newId;
+        }
+
         // 把 list 裡路徑在 oldRel 之下（含自己）的 id 換成新路徑，順序不變；換完已經存在的 id 只留一筆
         static int MoveIds(List<string> list, string oldRel, string newRel)
         {
             int changed = 0;
             for (int i = 0; i < list.Count; i++)
             {
-                string rel;
-                try
-                {
-                    rel = Helper.DecodeUrlBase64(list[i]).Replace('\\', '/');
-                }
-                catch (Exception)
-                {
-                    continue;
-                }
-                string tail = null;
-                if (string.Equals(rel.TrimEnd('/'), oldRel, StringComparison.OrdinalIgnoreCase))
-                {
-                    tail = rel.Substring(oldRel.Length);
-                }
-                else if (rel.StartsWith(oldRel + "/", StringComparison.OrdinalIgnoreCase))
-                {
-                    tail = rel.Substring(oldRel.Length);
-                }
-                if (tail == null)
-                {
-                    continue;
-                }
-                string newId = Helper.EncodeUrlBase64(newRel + tail);
-                if (newId == list[i])
+                string newId = RemapId(list[i], oldRel, newRel);
+                if (newId == null)
                 {
                     continue;
                 }
@@ -324,6 +334,19 @@ namespace WhatSearch.Services
                 if (n > 0)
                 {
                     logger.Info("最愛：資料夾改名，{0} 筆最愛從「{1}」跟到「{2}」", n, oldRel, newRel);
+                }
+                // 播放紀錄也要跟著改名（共用這一組 watcher，不另外再開一組）
+                try
+                {
+                    int p = Ioc.Get<IPlayStatService>().MoveFolder(oldRel, newRel);
+                    if (p > 0)
+                    {
+                        logger.Info("播放紀錄：資料夾改名，{0} 筆紀錄從「{1}」跟到「{2}」", p, oldRel, newRel);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    logger.Warn(ex, "播放紀錄：處理資料夾改名失敗：{0} → {1}", oldRel, newRel);
                 }
             }
             catch (Exception ex)

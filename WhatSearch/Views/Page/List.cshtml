@@ -328,6 +328,12 @@
         -webkit-tap-highlight-color: transparent;
     }
     /* 我的最愛：拖曳排序的把手（只有按住把手才會拖，其他地方照舊點擊／捲動） */
+    /* 專輯標題區：手機長按複製曲目，不要被瀏覽器當成選取文字或跳出系統選單 */
+    @@media (hover: none) {
+        .album-press { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+    }
+    .album-copy-btn { border: 0; background: transparent; color: #aaa; padding: 0 6px; font-size: 14px; line-height: 1; vertical-align: middle; }
+    .album-copy-btn:hover { color: #198754; }
     .drag-handle {
         flex: 0 0 auto;
         width: 30px;
@@ -746,9 +752,12 @@
                     <button v-if="canEditCover" type="button" class="btn btn-sm btn-dark" :class="{'cover-edit-btn': videoCoverUrl}" style="position:absolute; right:6px; bottom:6px; padding:1px 8px;" title="搜尋並更換封面" v-on:click="vm_openCoverEdit()"><i class="fa fa-image"></i> 改圖</button>
                 </div>
                 <div style="flex:1; min-width:0;">
-                    <div style="font-size:1.2rem; font-weight:bold; word-break:break-all;">{{ musicFolder.title }}</div>
-                    <div v-if="musicFolder.artist" style="color:#555;">{{ musicFolder.artist }}</div>
-                    <div v-if="musicFolder.folderName && musicFolder.folderName !== musicFolder.title" style="color:#999; font-size:12px; word-break:break-all;">{{ musicFolder.folderName }}</div>
+                    <div class="album-press" v-on:pointerdown="vm_albumPressStart($event)" v-on:pointermove="vm_albumPressMove($event)"
+                            v-on:pointerup="vm_albumPressEnd()" v-on:pointercancel="vm_albumPressEnd()" v-on:contextmenu="vm_albumContext($event)">
+                        <div style="font-size:1.2rem; font-weight:bold; word-break:break-all;">{{ musicFolder.title }}<button type="button" class="album-copy-btn" title="複製曲目清單（手機：長按這一區）" v-on:click.stop="vm_copyAlbumTracks()"><i class="fa fa-copy"></i></button></div>
+                        <div v-if="musicFolder.artist" style="color:#555;">{{ musicFolder.artist }}</div>
+                        <div v-if="musicFolder.folderName && musicFolder.folderName !== musicFolder.title" style="color:#999; font-size:12px; word-break:break-all;">{{ musicFolder.folderName }}</div>
+                    </div>
                     <div style="color:#888; font-size:13px; margin:4px 0 8px;">
                         {{ musicFolder.tracks.length }} 首<span v-if="musicFolder.totalSeconds"> · {{ formatDuration(musicFolder.totalSeconds) }}</span><span v-if="musicFolder.year"> · {{ musicFolder.year }}</span>
                     </div>
@@ -1297,6 +1306,9 @@
                     favActionsId: '',
                     favActionsTimer: null,
                     favPress: null,
+                    albumPress: null,
+                    // 這次播放的「聽過」累計：{ id, last（上次 currentTime）, listened（實際聽的秒數）, reported }
+                    playStat: null,
                     favSwallowClickUntil: 0,
                     cuePlayItemId: '',
                     tierBusy: false,
@@ -2292,6 +2304,66 @@
                     if (this.vm_isFavTrackRow(item) && this.vm_isTouchOnly()) {
                         e.preventDefault();
                     }
+                },
+                // 專輯標題區長按（只限觸控）複製曲目清單；一般點擊不做事
+                vm_albumPressStart: function (e) {
+                    this.vm_albumPressCancel();
+                    if (e.pointerType !== 'touch' || !this.vm_isTouchOnly() || (e.target.closest && e.target.closest('button'))) {
+                        return;
+                    }
+                    let press = { x: e.clientX, y: e.clientY, timer: 0 };
+                    press.timer = window.setTimeout(() => {
+                        this.albumPress = null;
+                        try { if (navigator.vibrate) { navigator.vibrate(30); } } catch (err) { }
+                        this.vm_copyAlbumTracks();
+                    }, 600);
+                    this.albumPress = press;
+                },
+                vm_albumPressMove: function (e) {
+                    let p = this.albumPress;
+                    if (p && (Math.abs(e.clientX - p.x) > 10 || Math.abs(e.clientY - p.y) > 10)) {
+                        this.vm_albumPressCancel();
+                    }
+                },
+                vm_albumPressEnd: function () {
+                    this.vm_albumPressCancel();
+                },
+                vm_albumPressCancel: function () {
+                    if (this.albumPress) {
+                        window.clearTimeout(this.albumPress.timer);
+                        this.albumPress = null;
+                    }
+                },
+                vm_albumContext: function (e) {
+                    if (this.vm_isTouchOnly()) {
+                        e.preventDefault();
+                    }
+                },
+                // 複製專輯曲目：第一行是「專輯 - 演出者（年份）」，之後每首「編號. 曲名 - 演出者」；多片裝每片前面加光碟標題
+                vm_copyAlbumTracks: function () {
+                    let f = this.musicFolder;
+                    if (!f || !f.tracks || f.tracks.length === 0) {
+                        this.vm_toast('目前沒有可複製的曲目');
+                        return;
+                    }
+                    let head = f.title || f.folderName || '';
+                    if (f.artist && f.artist !== '多位演出者') {
+                        head += ' - ' + f.artist;
+                    }
+                    if (f.year) {
+                        head += '（' + f.year + '）';
+                    }
+                    let lines = [head];
+                    f.groups.forEach(g => {
+                        if (f.groups.length > 1 && g.title) {
+                            lines.push(g.title);
+                        }
+                        g.tracks.forEach(t => {
+                            let who = t.artist || t.item.artist || t.item.cueArtist || '';
+                            lines.push(t.no + '. ' + t.title + (who ? ' - ' + who : ''));
+                        });
+                    });
+                    this.vm_copyText(lines.join('\n'), f.tracks.length + ' 首');
                 },
                 vm_favActionsShow: function (id) {
                     this.favActionsId = id;
@@ -4560,6 +4632,7 @@
                         window.audio = new Audio();
                         window.audio.addEventListener('timeupdate', t => {
                             self.nowPlaying.currentTime = window.audio.currentTime;
+                            self.vm_playStatTick();
                             let d = window.audio.duration;
                             if ('mediaSession' in navigator && navigator.mediaSession.setPositionState && isFinite(d) && d > 0) {
                                 try {
@@ -4694,11 +4767,41 @@
                     this.nowPlaying.format = /[?&]mp3=true(&|$)/.test(audioURL) ? 'MP3（轉檔）' : (/\.flac(\?|$)/i.test(audioURL) ? 'FLAC 原檔' : '');
                     this.nowPlaying.currentTime = 0;
                     this.nowPlaying.duration = 0;
+                    // 每次開始播都重新計算「聽過」（同一首重播、單曲循環也各算一次）
+                    this.playStat = { id: id, last: null, listened: 0, reported: false };
                     this.vm_setMediaSessionMode('audio');
                     this.vm_updateMediaSession();
 
                     console.log('play');
                     this.vm_scrollToPlaying();
+                },
+                // 累計實際聽的時間，聽滿 30 秒（曲子短於 60 秒就是過半）回報一次。
+                // 只累計正常往前走的時間：拖進度條、剛換歌 currentTime 跳動的那一格都不算，所以直接拖到結尾不會被當成聽過
+                vm_playStatTick: function () {
+                    let st = this.playStat, a = window.audio;
+                    if (!st || st.reported || !a || a.paused || st.id !== this.nowPlaying.id) {
+                        return;
+                    }
+                    let now = a.currentTime;
+                    if (st.last !== null) {
+                        let delta = now - st.last;
+                        // 手機鎖屏時 timeupdate 會變稀疏（可能數秒才一次），所以容許 5 秒以內的間隔；更大的跳動視為拖進度條
+                        if (delta > 0 && delta < 5) {
+                            st.listened += delta;
+                        }
+                    }
+                    st.last = now;
+                    let d = a.duration;
+                    let need = (isFinite(d) && d > 0) ? Math.min(30, d / 2) : 30;
+                    if (st.listened < need) {
+                        return;
+                    }
+                    st.reported = true;
+                    if (this.isLoggedIn === false) {
+                        return;
+                    }
+                    api.recordPlay(st.id, this.nowPlaying.title, this.nowPlaying.artist, this.nowPlaying.album,
+                        (isFinite(d) && d > 0) ? d : 0).catch(() => { });
                 },
                 vm_seekInput: function (evt) {
                     this.seekingTime = parseFloat(evt.target.value);
