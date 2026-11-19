@@ -49,6 +49,8 @@ namespace WhatSearch.Services
         [JsonPropertyName("last")] public string Last { get; set; }
         /// <summary>所在資料夾 id（前端用來跳過去）；CUE 曲目沒有</summary>
         [JsonPropertyName("folderId")] public string FolderId { get; set; }
+        /// <summary>檔案目前已經不存在（由 API 層檢查後標上；CUE 曲目不檢查）</summary>
+        [JsonPropertyName("missing")] public bool Missing { get; set; }
     }
 
     public class PlayStatAlbum
@@ -59,6 +61,8 @@ namespace WhatSearch.Services
         [JsonPropertyName("tracks")] public int Tracks { get; set; }
         [JsonPropertyName("last")] public string Last { get; set; }
         [JsonPropertyName("folderId")] public string FolderId { get; set; }
+        /// <summary>資料夾目前已經不存在（由 API 層檢查後標上）</summary>
+        [JsonPropertyName("missing")] public bool Missing { get; set; }
     }
 
     /// <summary>一筆播放紀錄（一行 JSON）</summary>

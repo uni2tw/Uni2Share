@@ -793,7 +793,46 @@ namespace WhatSearch.WebAPIs
             {
                 days = 0;
             }
-            return playStatService.GetStats(User.Identity.Name, days);
+            PlayStatsResult stats = playStatService.GetStats(User.Identity.Name, days);
+            MarkMissingPlays(stats);
+            return stats;
+        }
+
+        /// <summary>
+        /// 把統計裡「檔案／資料夾已經不存在」的標上 missing（只標示，紀錄不動）。
+        /// 只檢查畫面會列出的那幾十列，每種檔案路徑只查一次。
+        /// 一般（非 CUE）曲目全部都找不到時不標：多半是分享磁碟沒連上，標了會誤導。
+        /// </summary>
+        void MarkMissingPlays(PlayStatsResult stats)
+        {
+            var fileExists = new Dictionary<string, bool>(StringComparer.Ordinal);
+            Func<string, bool> trackExists = id =>
+            {
+                bool ok;
+                if (fileExists.TryGetValue(id, out ok) == false)
+                {
+                    string path = null;
+                    try { path = fimgr.GetPath(id); } catch (Exception) { }
+                    ok = string.IsNullOrEmpty(path) == false && System.IO.File.Exists(path);
+                    fileExists[id] = ok;
+                }
+                return ok;
+            };
+            var tracks = stats.TopTracks.Concat(stats.Recent).Where(t => t.FolderId != null).ToList();
+            if (tracks.Count == 0 || tracks.All(t => trackExists(t.Id) == false))
+            {
+                return;
+            }
+            foreach (PlayStatTrack t in tracks)
+            {
+                t.Missing = trackExists(t.Id) == false;
+            }
+            foreach (PlayStatAlbum a in stats.TopAlbums.Where(x => x.FolderId != null))
+            {
+                string path = null;
+                try { path = fimgr.GetPath(a.FolderId); } catch (Exception) { }
+                a.Missing = string.IsNullOrEmpty(path) || System.IO.Directory.Exists(path) == false;
+            }
         }
 
         /// <summary>自訂「我的最愛」單曲的順序（拖曳排序後呼叫）。ids 是畫面上單曲由上到下的 id；沒列在 ids 裡的最愛（例如找不到的）位置不動</summary>
