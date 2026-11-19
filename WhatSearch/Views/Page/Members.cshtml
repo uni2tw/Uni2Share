@@ -354,7 +354,7 @@
     </script>
 
 <body>
-    <div id="main" class="container" style="max-width:900px; padding-top:16px;" v-cloak>
+    <div id="main" class="container" style="max-width:1100px; padding:16px 16px 10px;" v-cloak>
         <div class="alert alert-info" style="display:none; margin-bottom:10px"></div>
         <h1 class="h3" style="display:flex; align-items:center; gap:10px;">
             <button type="button" class="btn btn-sm btn-info" v-on:click="vm_home()" title="回首頁"><i class="fa fa-home"></i></button>
@@ -381,8 +381,7 @@
                         <th>身分</th>
                         <th>註冊</th>
                         <th title="上次輸入密碼登入的時間；登入後 30 天內不用再輸入密碼，所以不代表最近有沒有來">上次登入</th>
-                        <th title="最近一次開頁面、瀏覽資料夾、搜尋或播放的時間">最後來訪</th>
-                        <th title="每位會員只記最後一筆，不留瀏覽歷程">最近看過／聽過</th>
+                        <th style="min-width:190px;" title="最近一次來訪（開頁面、瀏覽資料夾、搜尋或播放）、最後瀏覽的資料夾與最後播放的檔案；每位會員只記最後一筆，不留歷程">最近動態</th>
                         <th></th>
                     </tr>
                 </thead>
@@ -408,21 +407,18 @@
                         </td>
                         <td style="font-size:13px; color:#666; white-space:nowrap;">{{ formatCreate(member.create) }}</td>
                         <td style="font-size:13px; color:#666; white-space:nowrap;" :title="formatDate(member.access)">{{ formatLast(member) }}</td>
-                        <td style="font-size:13px; color:#666; white-space:nowrap;" :title="member.seen ? formatDate(member.seen) : ''">
-                            <template v-if="member.seen">{{ formatAgo(member.seen) }}<div v-if="member.device" style="font-size:12px; color:#999;">{{ member.device }}</div></template>
-                            <span v-else style="color:#bbb;">沒有記錄</span>
-                        </td>
-                        <td style="font-size:12px; color:#666; max-width:260px;">
+                        <td style="font-size:12px; color:#666; min-width:190px; max-width:210px;">
+                            <div v-if="member.seen" style="font-size:13px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" :title="formatDate(member.seen)"><i class="fa fa-clock" style="color:#999;"></i> {{ formatAgo(member.seen) }}<span v-if="member.device" style="color:#999;"> · {{ member.device }}</span></div>
                             <div v-if="member.folder" style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" :title="member.folder + '　' + formatDate(member.folderOn)"><i class="fa fa-folder" style="color:#e0a800;"></i> {{ lastName(member.folder) }} <span style="color:#999;">· {{ formatAgo(member.folderOn) }}</span></div>
                             <div v-if="member.played" style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" :title="member.played + '　' + formatDate(member.playedOn)"><i class="fa fa-play" style="color:#198754;"></i> {{ lastName(member.played, true) }} <span style="color:#999;">· {{ formatAgo(member.playedOn) }}</span></div>
-                            <span v-if="!member.folder && !member.played" style="color:#bbb;">沒有記錄</span>
+                            <span v-if="!member.seen && !member.folder && !member.played" style="color:#bbb; font-size:13px;">沒有記錄</span>
                         </td>
                         <td style="white-space:nowrap; text-align:right;">
                             <span v-if="vm_changed(member)" style="font-size:12px; color:#b26a00; margin-right:6px;">尚未儲存</span>
-                            <button type="button" class="btn btn-sm btn-primary" :disabled="!vm_changed(member) || member.saving" v-on:click="vm_update(member)"><i class="fa fa-floppy-disk"></i> 儲存</button>
-                            <button v-if="member.locked" type="button" class="btn btn-sm btn-danger" style="margin-left:4px;" :disabled="member.unlocking" title="解除鎖定，讓這位會員可以再嘗試登入" v-on:click="vm_unlock(member)"><i class="fa fa-lock-open"></i> 解除鎖定</button>
-                            <button type="button" class="btn btn-sm btn-outline-secondary" style="margin-left:4px;" title="重設這位會員的密碼" v-on:click="vm_openReset(member)"><i class="fa fa-key"></i> 重設密碼</button>
-                            <button type="button" class="btn btn-sm btn-outline-danger" style="margin-left:4px;" :disabled="member.self || member.savedRole === 'admin' || member.deleting" :title="member.self ? '不能刪除自己' : (member.savedRole === 'admin' ? '管理者不能直接刪除，請先改成會員或待啟用' : '刪除這位會員與他的評分、最愛、置頂')" v-on:click="vm_delete(member)"><i class="fa fa-trash"></i> 刪除</button>
+                            <button type="button" class="btn btn-sm btn-primary" :disabled="!vm_changed(member) || member.saving" title="儲存身分變更" v-on:click="vm_update(member)"><i class="fa fa-floppy-disk"></i></button>
+                            <button v-if="member.locked" type="button" class="btn btn-sm btn-danger" style="margin-left:4px;" :disabled="member.unlocking" title="解除鎖定，讓這位會員可以再嘗試登入" v-on:click="vm_unlock(member)"><i class="fa fa-lock-open"></i></button>
+                            <button type="button" class="btn btn-sm btn-outline-secondary" style="margin-left:4px;" title="重設這位會員的密碼" v-on:click="vm_openReset(member)"><i class="fa fa-key"></i></button>
+                            <button type="button" class="btn btn-sm btn-outline-danger" style="margin-left:4px;" :disabled="member.self || member.savedRole === 'admin' || member.deleting" :title="member.self ? '不能刪除自己' : (member.savedRole === 'admin' ? '管理者不能直接刪除，請先改成會員或待啟用' : '刪除這位會員與他的評分、最愛、置頂')" v-on:click="vm_delete(member)"><i class="fa fa-trash"></i></button>
                         </td>
                     </tr>
                 </tbody>
