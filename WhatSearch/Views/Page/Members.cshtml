@@ -313,6 +313,37 @@
                         if (days < 365) { return Math.floor(days / 30) + ' 個月前'; }
                         return Math.floor(days / 365) + ' 年前';
                     },
+                    // 最後來訪等動態的相對時間：剛剛、N 分鐘前、N 小時前、昨天、N 天前…；沒有記錄是空字串
+                    formatAgo: function (dateStr) {
+                        if (!dateStr) {
+                            return '';
+                        }
+                        var t = new Date(dateStr);
+                        var mins = Math.floor((Date.now() - t.getTime()) / 60000);
+                        if (mins < 1) { return '剛剛'; }
+                        if (mins < 60) { return mins + ' 分鐘前'; }
+                        var today = new Date(); today.setHours(0, 0, 0, 0);
+                        var day = new Date(t.getFullYear(), t.getMonth(), t.getDate());
+                        var days = Math.round((today - day) / 86400000);
+                        if (days <= 0) { return Math.floor(mins / 60) + ' 小時前'; }
+                        if (days === 1) { return '昨天'; }
+                        if (days < 31) { return days + ' 天前'; }
+                        if (days < 365) { return Math.floor(days / 30) + ' 個月前'; }
+                        return Math.floor(days / 365) + ' 年前';
+                    },
+                    // /分享名/資料夾/檔名.mp3 → 檔名（資料夾）；資料夾 → 最後一段
+                    lastName: function (path, withFolder) {
+                        if (!path) {
+                            return '';
+                        }
+                        var parts = path.split('/').filter(function (x) { return x; });
+                        var name = parts[parts.length - 1] || '';
+                        if (!withFolder) {
+                            return name;
+                        }
+                        name = name.replace(/\.[^.]+$/, '');
+                        return parts.length > 1 ? name + '（' + parts[parts.length - 2] + '）' : name;
+                    },
                     formatCreate: function (dateStr) {
                         return dateStr ? new Date(dateStr).toLocaleDateString() : '';
                     }
@@ -349,7 +380,9 @@
                         <th>會員</th>
                         <th>身分</th>
                         <th>註冊</th>
-                        <th>上次登入</th>
+                        <th title="上次輸入密碼登入的時間；登入後 30 天內不用再輸入密碼，所以不代表最近有沒有來">上次登入</th>
+                        <th title="最近一次開頁面、瀏覽資料夾、搜尋或播放的時間">最後來訪</th>
+                        <th title="每位會員只記最後一筆，不留瀏覽歷程">最近看過／聽過</th>
                         <th></th>
                     </tr>
                 </thead>
@@ -375,6 +408,15 @@
                         </td>
                         <td style="font-size:13px; color:#666; white-space:nowrap;">{{ formatCreate(member.create) }}</td>
                         <td style="font-size:13px; color:#666; white-space:nowrap;" :title="formatDate(member.access)">{{ formatLast(member) }}</td>
+                        <td style="font-size:13px; color:#666; white-space:nowrap;" :title="member.seen ? formatDate(member.seen) : ''">
+                            <template v-if="member.seen">{{ formatAgo(member.seen) }}<div v-if="member.device" style="font-size:12px; color:#999;">{{ member.device }}</div></template>
+                            <span v-else style="color:#bbb;">沒有記錄</span>
+                        </td>
+                        <td style="font-size:12px; color:#666; max-width:260px;">
+                            <div v-if="member.folder" style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" :title="member.folder + '　' + formatDate(member.folderOn)"><i class="fa fa-folder" style="color:#e0a800;"></i> {{ lastName(member.folder) }} <span style="color:#999;">· {{ formatAgo(member.folderOn) }}</span></div>
+                            <div v-if="member.played" style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" :title="member.played + '　' + formatDate(member.playedOn)"><i class="fa fa-play" style="color:#198754;"></i> {{ lastName(member.played, true) }} <span style="color:#999;">· {{ formatAgo(member.playedOn) }}</span></div>
+                            <span v-if="!member.folder && !member.played" style="color:#bbb;">沒有記錄</span>
+                        </td>
                         <td style="white-space:nowrap; text-align:right;">
                             <span v-if="vm_changed(member)" style="font-size:12px; color:#b26a00; margin-right:6px;">尚未儲存</span>
                             <button type="button" class="btn btn-sm btn-primary" :disabled="!vm_changed(member) || member.saving" v-on:click="vm_update(member)"><i class="fa fa-floppy-disk"></i> 儲存</button>

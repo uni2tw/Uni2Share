@@ -47,7 +47,8 @@ namespace WhatSearch.Controllers
             IUserService srv = Ioc.Get<IUserService>();
             string me = User.Identity.Name;
             // 只給頁面需要的欄位（不含密碼雜湊與存取權杖）
-            var model = srv.GetMembers().Select(m => new MemberView
+            IActivityService activitySrv = Ioc.Get<IActivityService>();
+            var model = srv.GetMembers().Select(m => { var act = activitySrv.Get(m.Name); return new MemberView
             {
                 name = m.Name,
                 display = m.DisplayName,
@@ -57,8 +58,14 @@ namespace WhatSearch.Controllers
                 access = m.LastAccessTime,
                 locked = m.Locked,
                 fails = m.FailedLoginCount,
-                self = string.Equals(m.Name, me, StringComparison.Ordinal)
-            }).ToList();
+                self = string.Equals(m.Name, me, StringComparison.Ordinal),
+                seen = act?.Seen,
+                device = act?.Device,
+                folder = act?.Folder,
+                folderOn = act?.FolderTime,
+                played = act?.Played,
+                playedOn = act?.PlayedTime
+            }; }).ToList();
             return View(model);
         }
 
@@ -299,6 +306,7 @@ namespace WhatSearch.Controllers
             int favs = Ioc.Get<IFavoriteService>().RemoveMember(mem.Name);
             int pins = Ioc.Get<IPinService>().RemoveMember(mem.Name);
             Ioc.Get<INewsService>().RemoveMember(mem.Name);
+            Ioc.Get<IActivityService>().RemoveMember(mem.Name);
             return new
             {
                 Success = 1,
@@ -751,6 +759,13 @@ namespace WhatSearch.Controllers
             public bool locked { get; set; }
             public int fails { get; set; }
             public bool self { get; set; }
+            /// <summary>最後來訪、裝置、最後瀏覽的資料夾、最後播放的檔案（沒記錄過是 null）</summary>
+            public DateTime? seen { get; set; }
+            public string device { get; set; }
+            public string folder { get; set; }
+            public DateTime? folderOn { get; set; }
+            public string played { get; set; }
+            public DateTime? playedOn { get; set; }
         }
     }
     public class RatingsTransferModel

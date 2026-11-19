@@ -29,6 +29,7 @@ namespace WhatSearch.WebAPIs
         IMainService mainService = Ioc.Get<IMainService>();
         IFavoriteService favoriteService = Ioc.Get<IFavoriteService>();
         IPlayStatService playStatService = Ioc.Get<IPlayStatService>();
+        IActivityService activityService = Ioc.Get<IActivityService>();
         ILoudnessService loudnessService = Ioc.Get<ILoudnessService>();
         ITranscodeService transcodeService = Ioc.Get<ITranscodeService>();
         IRatingService ratingService = Ioc.Get<IRatingService>();
@@ -137,6 +138,7 @@ namespace WhatSearch.WebAPIs
                             .Select(t => new { t.Id, Text = t.Title, Link = t.GetUrl, Type = t.Type })
                     };
                 }
+                RecordFolderActivity(model.p);
                 items.AddRange(mainService.GetFileInfoViewsInTheFolder(model.p));
                 breadcrumbs.AddRange(mainService.GetBreadcrumbs(model.p));
                 discs = mainService.GetMultiDiscGroups(model.p);
@@ -796,6 +798,22 @@ namespace WhatSearch.WebAPIs
             PlayStatsResult stats = playStatService.GetStats(User.Identity.Name, days);
             MarkMissingPlays(stats);
             return stats;
+        }
+
+        /// <summary>記下登入會員最後瀏覽的資料夾（後台會員列表的「最近看過」用）；失敗不影響瀏覽</summary>
+        void RecordFolderActivity(string folderId)
+        {
+            if (User.Identity.IsAuthenticated == false)
+            {
+                return;
+            }
+            try
+            {
+                activityService.SetFolder(User.Identity.Name, Helper.DecodeUrlBase64(folderId).Replace('\\', '/'));
+            }
+            catch (Exception)
+            {
+            }
         }
 
         /// <summary>
