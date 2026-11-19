@@ -309,6 +309,15 @@
         text-overflow: ellipsis;
         white-space: nowrap;
     }
+    /* 播放列的曲名／藝人專輯：太長時可左右拖曳（手機直接滑、桌機按住滑鼠拖）看後面，不再用省略號截掉 */
+    .np-scroll {
+        overflow-x: auto;
+        white-space: nowrap;
+        scrollbar-width: none;
+    }
+    .np-scroll::-webkit-scrollbar { display: none; }
+    .np-scroll.np-can-scroll { cursor: grab; }
+    .np-scroll.np-dragging { cursor: grabbing; user-select: none; }
     .track-dur {
         flex: 0 0 auto;
         color: #999;
@@ -943,9 +952,9 @@
                 <i class="fa" :class="nowPlaying.paused ? 'fa-play' : 'fa-pause'"></i>
             </button>
             <div style="flex-grow:1; overflow:hidden; margin-right:10px;">
-                <div style="white-space:nowrap; text-overflow:ellipsis; overflow:hidden;">{{ nowPlaying.title }}</div>
+                <div class="np-scroll" v-drag-scroll="nowPlaying.id">{{ nowPlaying.title }}</div>
                 <div v-if="resumeHint" style="font-size:11px; color:#8fd19e;">被其他 App 打斷了，點一下播放鍵繼續</div>
-                <div v-if="nowPlaying.artist || nowPlaying.album || nowPlaying.format" style="font-size:11px; color:#aaa; white-space:nowrap; text-overflow:ellipsis; overflow:hidden;">{{ formatArtistAlbum(nowPlaying) }}<span v-if="nowPlaying.format" :style="{color: nowPlaying.format === 'FLAC 原檔' ? '#e0b45c' : '#8fd19e'}">{{ (nowPlaying.artist || nowPlaying.album) ? ' · ' : '' }}{{ nowPlaying.format }}</span></div>
+                <div v-if="nowPlaying.artist || nowPlaying.album || nowPlaying.format" class="np-scroll" v-drag-scroll="nowPlaying.id" style="font-size:11px; color:#aaa;">{{ formatArtistAlbum(nowPlaying) }}<span v-if="nowPlaying.format" :style="{color: nowPlaying.format === 'FLAC 原檔' ? '#e0b45c' : '#8fd19e'}">{{ (nowPlaying.artist || nowPlaying.album) ? ' · ' : '' }}{{ nowPlaying.format }}</span></div>
             </div>
             <div style="white-space:nowrap; font-size:12px;">{{ formatTime(seekingTime !== null ? seekingTime : nowPlaying.currentTime) }} / {{ formatTime(nowPlaying.duration) }}</div>
             <div v-if="isLoggedIn && String(nowPlaying.id).indexOf('cue:') !== 0" class="fav-btn" :class="{'fav-on': favTrackMap[nowPlaying.id]}" title="加入最愛"
@@ -5322,6 +5331,47 @@
         };
 
         const app = Vue.createApp(App);
+
+        // 拖曳捲動：內容比容器寬時，按住滑鼠左右拖可捲動（觸控裝置靠瀏覽器原生橫向滑動）。
+        // 綁定值（目前曲目 id）改變時捲回最左邊，換歌後從頭開始看
+        app.directive('drag-scroll', {
+            mounted(el) {
+                const refresh = () => el.classList.toggle('np-can-scroll', el.scrollWidth > el.clientWidth + 1);
+                el.__dsRefresh = refresh;
+                el.__dsObserver = new ResizeObserver(refresh);
+                el.__dsObserver.observe(el);
+                el.__dsDown = (e) => {
+                    if (e.pointerType === 'touch' || e.button !== 0 || el.scrollWidth <= el.clientWidth + 1) {
+                        return;
+                    }
+                    const startX = e.clientX;
+                    const startLeft = el.scrollLeft;
+                    el.classList.add('np-dragging');
+                    const move = (ev) => { el.scrollLeft = startLeft - (ev.clientX - startX); };
+                    const up = () => {
+                        el.classList.remove('np-dragging');
+                        window.removeEventListener('pointermove', move);
+                        window.removeEventListener('pointerup', up);
+                        window.removeEventListener('pointercancel', up);
+                    };
+                    window.addEventListener('pointermove', move);
+                    window.addEventListener('pointerup', up);
+                    window.addEventListener('pointercancel', up);
+                };
+                el.addEventListener('pointerdown', el.__dsDown);
+                refresh();
+            },
+            updated(el, binding) {
+                if (binding.value !== binding.oldValue) {
+                    el.scrollLeft = 0;
+                }
+                el.__dsRefresh();
+            },
+            unmounted(el) {
+                el.__dsObserver.disconnect();
+                el.removeEventListener('pointerdown', el.__dsDown);
+            }
+        });
 
         app.component('BreadcrumbsComponent', {
           template: `
