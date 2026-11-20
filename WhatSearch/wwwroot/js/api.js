@@ -111,6 +111,11 @@ api.setCover = function(id, url) {
     return axios.post('/api/coverset', { id: id, url: url });
 }
 
+// 管理者儲存專輯介紹（資料夾裡的 README.md）；text 是空白就是清空（刪檔）
+api.saveAlbumNote = function(id, text) {
+    return axios.post('/api/albumnote', { id: id, text: text });
+}
+
 // 會員點 CUE 或它的 FLAC：取得專輯曲目與即時拆軌進度（沒轉過會排進佇列）
 api.cueOpen = function(id) {
     return axios.post('/api/cue/open', { id: id });

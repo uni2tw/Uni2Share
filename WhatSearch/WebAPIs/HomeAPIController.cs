@@ -114,6 +114,7 @@ namespace WhatSearch.WebAPIs
             List<FileInfoView> breadcrumbs = new();
             List<DiscGroup> discs = null;
             object currentRating = null;
+            object albumNote = null;
             if (model == null || string.IsNullOrEmpty(model.p))
             {
                 items.AddRange(mainService.GetRootShareFolders());
@@ -173,6 +174,7 @@ namespace WhatSearch.WebAPIs
                     // 專輯頁（2 首以上音樂，或多片裝的母資料夾）：最上方顯示「我的評分」
                     RatingInfo album = ratingService.ResolveAlbum(new DirectoryInfo(folderPath).Name, me);
                     currentRating = new { id = model.p, name = album.Plain, rating = album.Rating, kind = "album", unplayable = false, unplayable_by = (string)null, unplayable_time = (long?)null };
+                    albumNote = BuildAlbumNote(folderPath);
                 }
             }
             return new
@@ -184,6 +186,7 @@ namespace WhatSearch.WebAPIs
                 items,
                 discs = discs == null ? null : discs.Select(d => new { id = d.Id, no = d.No, title = d.Title, items = d.Items }),
                 current = currentRating,
+                note = albumNote,
                 breadcrumbs = breadcrumbs.Select(t => new { t.Id, Text = t.Title, Link = t.GetUrl, Type = t.Type })
             };
         }
@@ -1100,6 +1103,118 @@ namespace WhatSearch.WebAPIs
             int music = new DirectoryInfo(folderPath).EnumerateFiles()
                 .Count(f => f.Attributes.HasFlag(FileAttributes.Hidden) == false && Helper.GetFileDocType(f.Extension) == Helper.ConstStrings.Music);
             return music >= 2 || mainService.GetMultiDiscGroups(folderId) != null;
+        }
+
+        // ----- 專輯介紹：專輯資料夾裡的 README.md（只有管理者能編輯，會員只能看） -----
+        const int AlbumNoteMaxBytes = 64 * 1024;
+        const long AlbumNoteReadMaxBytes = 256 * 1024;
+
+        /// <summary>資料夾裡的 README.md（檔名大小寫不拘），沒有回傳 null</summary>
+        static string FindAlbumNoteFile(string folderPath)
+        {
+            return Directory.EnumerateFiles(folderPath)
+                .FirstOrDefault(f => string.Equals(Path.GetFileName(f), "README.md", StringComparison.OrdinalIgnoreCase));
+        }
+
+        /// <summary>讀專輯介紹並轉成 HTML；沒有檔案、內容是空白或讀取失敗都回傳 null。原文（raw）只給管理者，編輯用</summary>
+        object BuildAlbumNote(string folderPath)
+        {
+            try
+            {
+                string file = FindAlbumNoteFile(folderPath);
+                if (file == null || new FileInfo(file).Length > AlbumNoteReadMaxBytes)
+                {
+                    return null;
+                }
+                string text = TextDecoder.Decode(System.IO.File.ReadAllBytes(file));
+                if (string.IsNullOrWhiteSpace(text))
+                {
+                    return null;
+                }
+                return new
+                {
+                    html = Markdown.ToHtml(text, TextPreviewMarkdownPipeline),
+                    raw = User.IsInRole("Admin") ? text : null
+                };
+            }
+            catch (Exception ex)
+            {
+                logger.Warn(ex, "讀取專輯介紹失敗：" + folderPath);
+                return null;
+            }
+        }
+
+        /// <summary>
+        /// 管理者新增／修改／清空專輯介紹（資料夾裡的 README.md）。text 是空白就刪掉檔案；只限專輯頁（CUE 專輯不支援）。
+        /// 先寫到系統暫存目錄再搬進去，跟換封面一樣，避免檔案監看器看到寫到一半的檔案。
+        /// </summary>
+        [HttpPost]
+        [Route("api/albumnote")]
+        [UserAuthorize]
+        public IActionResult SetAlbumNote([FromBody] AlbumNoteInputModel model)
+        {
+            if (User.IsInRole("Admin") == false)
+            {
+                return StatusCode(403);
+            }
+            if (model == null || string.IsNullOrEmpty(model.id))
+            {
+                return BadRequest("參數錯誤");
+            }
+            string folderPath = fimgr.GetPath(model.id);
+            if (string.IsNullOrEmpty(folderPath) || Directory.Exists(folderPath) == false)
+            {
+                return NotFound("找不到這個資料夾");
+            }
+            if (IsAlbumFolder(model.id, folderPath) == false)
+            {
+                return BadRequest("這個資料夾不支援專輯介紹");
+            }
+            string existing = FindAlbumNoteFile(folderPath);
+            string text = (model.text ?? string.Empty).Replace("\r\n", "\n").Replace('\r', '\n').TrimEnd();
+            if (string.IsNullOrWhiteSpace(text))
+            {
+                if (existing != null)
+                {
+                    try
+                    {
+                        System.IO.File.Delete(existing);
+                    }
+                    catch (Exception ex)
+                    {
+                        logger.Error(ex, "刪除專輯介紹失敗：" + existing);
+                        return StatusCode(500, "刪除失敗，請確認資料夾可以寫入");
+                    }
+                    logger.Info("清空專輯介紹：" + existing + "（" + User.Identity.Name + "）");
+                }
+                return Ok(new { ok = true, note = (object)null });
+            }
+            byte[] data = new UTF8Encoding(false).GetBytes(text.Replace("\n", "\r\n") + "\r\n");
+            if (data.Length > AlbumNoteMaxBytes)
+            {
+                return BadRequest("內容太長（上限 64 KB）");
+            }
+            string target = existing ?? Path.Combine(folderPath, "README.md");
+            string temp = Path.Combine(Path.GetTempPath(), "uni2share-note-" + Guid.NewGuid().ToString("N") + ".tmp");
+            try
+            {
+                System.IO.File.WriteAllBytes(temp, data);
+                System.IO.File.Move(temp, target, true);
+            }
+            catch (Exception ex)
+            {
+                logger.Error(ex, "寫入專輯介紹失敗：" + target);
+                try { System.IO.File.Delete(temp); } catch (Exception) { }
+                return StatusCode(500, "寫入失敗，請確認資料夾可以寫入");
+            }
+            logger.Info("更新專輯介紹：" + target + "（" + User.Identity.Name + "）");
+            return Ok(new { ok = true, note = BuildAlbumNote(folderPath) });
+        }
+
+        public class AlbumNoteInputModel
+        {
+            public string id { get; set; }
+            public string text { get; set; }
         }
 
         public class CoverSetInputModel

@@ -309,6 +309,10 @@
         text-overflow: ellipsis;
         white-space: nowrap;
     }
+    /* 專輯介紹（資料夾裡的 README.md） */
+    .album-note .markdown-body { font-size: 14px; padding: 4px 12px 10px; background: transparent; word-break: break-word; }
+    .album-note .markdown-body img { max-width: 100%; }
+    .album-note textarea { font-family: Consolas, Menlo, monospace; font-size: 13px; }
     /* 播放列的曲名／藝人專輯：太長時可左右拖曳（手機直接滑、桌機按住滑鼠拖）看後面，不再用省略號截掉 */
     .np-scroll {
         overflow-x: auto;
@@ -806,6 +810,35 @@
                         <div style="font-size:12px; color:#999; margin-top:6px;">這是伺服器即時拆出來的暫存 MP3，不會寫進分享資料夾，太久沒開會自動清掉。暫存的歌曲沒有評分、最愛與音量平衡。</div>
                     </div>
                 </div>
+            </div>
+        </div>
+        <div v-if="albumNoteVisible" class="album-note" style="padding:10px 5px 0;">
+            <div style="border:1px solid #ddd; border-radius:6px; background:#fafafa;">
+                <div style="display:flex; align-items:center; gap:6px; padding:6px 10px;">
+                    <span style="font-weight:bold; flex:1; cursor:pointer; user-select:none;" v-on:click="noteOpen = !noteOpen">
+                        <i class="fa" :class="noteOpen || noteEditing ? 'fa-chevron-down' : 'fa-chevron-right'" style="font-size:12px; width:14px;"></i> 專輯介紹
+                    </span>
+                    <template v-if="isAdmin && !noteEditing">
+                        <button v-if="!albumNote" type="button" class="btn btn-sm btn-outline-secondary" v-on:click="vm_noteEdit()"><i class="fa fa-plus"></i> 新增介紹</button>
+                        <template v-else>
+                            <button type="button" class="btn btn-sm btn-outline-secondary" title="編輯" v-on:click="vm_noteEdit()"><i class="fa fa-pen"></i> 編輯</button>
+                            <button type="button" class="btn btn-sm btn-outline-danger" title="清空介紹（刪除 README.md）" :disabled="noteSaving" v-on:click="vm_noteClear()"><i class="fa fa-trash"></i> 清空</button>
+                        </template>
+                    </template>
+                </div>
+                <div v-if="noteEditing" style="padding:0 10px 10px;">
+                    <textarea class="form-control" rows="12" v-model="noteDraft" :disabled="noteSaving"
+                        placeholder="貼上或輸入 Markdown 文字，例如每首歌的出處介紹…"></textarea>
+                    <div style="display:flex; align-items:center; gap:8px; margin-top:8px; flex-wrap:wrap;">
+                        <button type="button" class="btn btn-sm btn-success" :disabled="noteSaving" v-on:click="vm_noteSave(noteDraft)">
+                            <i class="fa" :class="noteSaving ? 'fa-spinner fa-spin' : 'fa-floppy-disk'"></i> 儲存
+                        </button>
+                        <button type="button" class="btn btn-sm btn-outline-secondary" :disabled="noteSaving" v-on:click="vm_noteCancel()">取消</button>
+                        <span style="font-size:12px; color:#999;">存成這個資料夾裡的 README.md（UTF-8），內容留空再儲存＝清空</span>
+                        <span v-if="noteError" style="font-size:13px; color:#dc3545;">{{ noteError }}</span>
+                    </div>
+                </div>
+                <div v-else-if="noteOpen && albumNote" class="markdown-body" v-html="albumNote.html" v-on:click="vm_noteClick"></div>
             </div>
         </div>
         <div v-if="favView" style="padding:8px 5px 0; display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
@@ -1373,6 +1406,12 @@
                     transcodePollTimer: null,
                     transcodeNoteTimer: null,
                     currentRating: null,
+                    albumNote: null,
+                    noteOpen: true,
+                    noteEditing: false,
+                    noteDraft: '',
+                    noteSaving: false,
+                    noteError: '',
                     ratingPicker: null,
                     sortMode: 'default',
                     sortFolderId: '',
@@ -1859,6 +1898,11 @@
                         groups: outGroups,
                         tracks: flat
                     };
+                },
+                // 專輯介紹：只在一般專輯頁（不含 CUE）顯示；有內容大家都看得到，沒內容只有管理者看得到「新增介紹」
+                albumNoteVisible: function() {
+                    return this.musicGridVisible && !this.cueViewVisible && !!this.currentRating && this.currentRating.kind === 'album' &&
+                        (!!this.albumNote || this.isAdmin);
                 },
                 musicGridVisible: function() {
                     return !!this.musicFolder && !this.showListView;
@@ -4296,6 +4340,50 @@
                         ' h264=' + can('video/mp4; codecs="avc1.640028, mp4a.40.2"') +
                         ' hevc=' + can('video/mp4; codecs="hvc1.1.6.L120.90, mp4a.40.2"'));
                 },
+                // ----- 專輯介紹（README.md）：管理者編輯／清空 -----
+                vm_noteEdit: function () {
+                    this.noteDraft = this.albumNote && this.albumNote.raw ? this.albumNote.raw : '';
+                    this.noteError = '';
+                    this.noteEditing = true;
+                },
+                vm_noteCancel: function () {
+                    this.noteEditing = false;
+                    this.noteError = '';
+                },
+                vm_noteSave: function (text) {
+                    let folderId = this.currentFolderId;
+                    if (this.noteSaving || !folderId) {
+                        return;
+                    }
+                    this.noteSaving = true;
+                    this.noteError = '';
+                    api.saveAlbumNote(folderId, text).then(res => {
+                        // 切到別的資料夾後才回來的結果不要套用
+                        if (this.currentFolderId === folderId) {
+                            this.albumNote = res.data.note || null;
+                            this.noteEditing = false;
+                        }
+                    }).catch(err => {
+                        let msg = err && err.response && typeof err.response.data === 'string' ? err.response.data : '';
+                        this.noteError = msg || '儲存失敗，請稍後再試';
+                    }).finally(() => {
+                        this.noteSaving = false;
+                    });
+                },
+                vm_noteClear: function () {
+                    if (!window.confirm('要清空這張專輯的介紹嗎？\n\n會刪除資料夾裡的 README.md，無法復原。')) {
+                        return;
+                    }
+                    this.vm_noteSave('');
+                },
+                // 介紹裡的連結一律另開分頁，不要離開目前的播放頁
+                vm_noteClick: function (ev) {
+                    let a = ev.target && ev.target.closest ? ev.target.closest('a') : null;
+                    if (a && a.getAttribute('href')) {
+                        a.target = '_blank';
+                        a.rel = 'noopener noreferrer';
+                    }
+                },
                 // 下載網址：加 download=true，伺服器會帶檔名並在日誌標成 download
                 vm_downloadUrl: function (url) {
                     return url ? url + (url.indexOf('?') === -1 ? '?' : '&') + 'download=true' : url;
@@ -4675,6 +4763,9 @@
 
                     this.newsView = false;
                     this.currentRating = res.current || null;
+                    this.albumNote = res.note || null;
+                    this.noteEditing = false;
+                    this.noteError = '';
                     this.vm_loadMediaInfo(res, items);
                     this.ratingFilter = 'all';
                     this.vm_markPlaying(res.items, res.discs);
