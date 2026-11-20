@@ -310,6 +310,7 @@
         white-space: nowrap;
     }
     /* 專輯介紹（資料夾裡的 README.md） */
+    .album-note-head { position: sticky; top: var(--nav-h, 56px); z-index: 5; background: #fafafa; border-radius: 6px; }
     .album-note-add { border: 0; background: none; color: #bbb; padding: 0 6px; margin-left: 4px; font-size: 12px; cursor: pointer; }
     .album-note-add:hover { color: #666; }
     .album-note .markdown-body { font-size: 14px; padding: 4px 12px 10px; background: transparent; word-break: break-word; }
@@ -818,8 +819,8 @@
         </div>
         <div v-if="albumNoteVisible" class="album-note" style="padding:10px 5px 0;">
             <div style="border:1px solid #ddd; border-radius:6px; background:#fafafa;">
-                <div style="display:flex; align-items:center; gap:6px; padding:6px 10px;">
-                    <span style="font-weight:bold; flex:1; cursor:pointer; user-select:none;" v-on:click="noteOpen = !noteOpen">
+                <div class="album-note-head" style="display:flex; align-items:center; gap:6px; padding:6px 10px;">
+                    <span style="font-weight:bold; flex:1; cursor:pointer; user-select:none;" v-on:click="vm_noteToggle()">
                         <i class="fa" :class="noteOpen || noteEditing ? 'fa-chevron-down' : 'fa-chevron-right'" style="font-size:12px; width:14px;"></i> 專輯介紹
                     </span>
                 </div>
@@ -2077,6 +2078,8 @@
                     }
                 });
                 window.addEventListener('pageshow', () => { this.vm_tryResumeAfterInterruption(); });
+                this.vm_navHeight();
+                window.addEventListener('resize', () => { this.vm_navHeight(); });
                 // 使用者自己捲動畫面（滾輪、觸控、翻頁鍵）時記下時間：換歌時 8 秒內不自動捲動，避免把正在瀏覽別處的人拉走
                 let markUserScroll = () => { this.lastUserScrollAt = Date.now(); };
                 window.addEventListener('wheel', markUserScroll, { passive: true });
@@ -4414,6 +4417,37 @@
                         ' hevc=' + can('video/mp4; codecs="hvc1.1.6.L120.90, mp4a.40.2"'));
                 },
                 // ----- 專輯介紹（README.md）：管理者編輯（存空白＝清空） -----
+                // 展開／收合。標題列在長文中間是黏在導覽列下方的，收合後內容變短，標題列回到原位可能已在畫面上方，所以要把它捲回看得到的地方
+                vm_noteToggle: function () {
+                    this.noteOpen = !this.noteOpen;
+                    if (this.noteOpen) {
+                        return;
+                    }
+                    this.$nextTick(() => {
+                        let head = document.querySelector('.album-note-head');
+                        if (!head) {
+                            return;
+                        }
+                        let navH = this.vm_navHeight();
+                        let top = head.getBoundingClientRect().top;
+                        if (top < navH) {
+                            let root = document.documentElement;
+                            let prev = root.style.scrollBehavior;
+                            root.style.scrollBehavior = 'auto';
+                            window.scrollTo(0, window.scrollY + top - navH - 8);
+                            root.style.scrollBehavior = prev;
+                        }
+                    });
+                },
+                // 頂部導覽列的高度（會隨視窗寬度變），同步給 CSS 變數 --nav-h 讓黏住的標題列停在它下面
+                vm_navHeight: function () {
+                    let nav = document.querySelector('nav.navbar');
+                    let h = nav ? Math.round(nav.getBoundingClientRect().height) : 0;
+                    if (h > 0) {
+                        document.documentElement.style.setProperty('--nav-h', h + 'px');
+                    }
+                    return h;
+                },
                 vm_noteEdit: function () {
                     this.noteDraft = this.albumNote && this.albumNote.raw ? this.albumNote.raw : '';
                     this.noteError = '';
@@ -4847,6 +4881,7 @@
                     this.activeFilter = null;
                     this.breadcrumbs = breadcrumbs;
                     this.vm_resumeMark(res);
+                    this.$nextTick(() => { this.vm_navHeight(); });
 
                     this.footerMessage = message;
 
