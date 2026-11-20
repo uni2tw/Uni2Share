@@ -523,6 +523,8 @@
         color: #555;
         border-bottom: 2px solid #ddd;
     }
+    .track-resume { box-shadow: inset 3px 0 0 #28a745; background: #f3faf4; }
+    .track-resume-tag { font-size: 11px; color: #28a745; }
     .track-playing .track-title,
     .track-playing .track-no {
         color: forestgreen;
@@ -871,11 +873,12 @@
                 </div>
                 <div v-for="t in g.tracks" :key="t.item.id"
                         v-on:click="vm_itemOver(t.item.id); vm_changeFolder(t.item)"
-                        class="track-row" :class="{'selected-item-row': t.item.selected, 'track-playing': t.item.playing}">
+                        class="track-row" :class="{'selected-item-row': t.item.selected, 'track-playing': t.item.playing, 'track-resume': t.item.id === resumeId && !t.item.playing}">
                     <div class="track-no"><i v-if="t.item.playing" class="fa fa-volume-high"></i><span v-else>{{ t.no }}</span></div>
                     <div class="track-main">
                         <div class="track-title">{{ t.title }}</div>
                         <div v-if="t.artist" class="track-artist">{{ t.artist }}</div>
+                        <div v-if="t.item.id === resumeId && !t.item.playing" class="track-resume-tag"><i class="fa fa-clock-rotate-left"></i> 上次聽到這</div>
                         <div v-if="t.item.transcode_state && t.item.transcode_state !== 'ready'" class="tc-badge" :class="'tc-' + t.item.transcode_state"><i v-if="t.item.transcode_state === 'pending'" class="fa fa-spinner fa-spin"></i> {{ vm_transcodeText(t.item) }}</div>
                     </div>
                     <div class="track-dur">{{ t.item.duration ? formatDuration(t.item.duration) : '' }}</div>
@@ -1403,6 +1406,7 @@
                     currentRating: null,
                     albumNote: null,
                     noteOpen: false,
+                    resumeId: '',
                     noteEditing: false,
                     noteDraft: '',
                     noteSaving: false,
@@ -2359,6 +2363,74 @@
                     let p = this.vm_idToPath(this.nowPlaying.id);
                     let i = p.lastIndexOf('/');
                     return i > 0 ? p.substring(0, i) : '';
+                },
+                // ----- 上次聽到哪：以資料夾為單位記在這個瀏覽器（localStorage 的 lastTracks），超過 24 小時沒再聽就失效 -----
+                vm_resumeLoad: function () {
+                    let list = [];
+                    try { list = JSON.parse(window.localStorage.getItem('lastTracks') || '[]'); } catch (e) { }
+                    if (!Array.isArray(list)) {
+                        return [];
+                    }
+                    let limit = Date.now() - 24 * 60 * 60 * 1000;
+                    return list.filter(e => e && e.id && e.t > limit);
+                },
+                vm_resumeDir: function (id) {
+                    let p = this.vm_idToPath(id);
+                    let i = p.lastIndexOf('/');
+                    return i >= 0 ? p.substring(0, i) : '';
+                },
+                vm_resumeStore: function (list) {
+                    try { window.localStorage.setItem('lastTracks', JSON.stringify(list.slice(-50))); } catch (e) { }
+                },
+                // 開始播一首：記下它是這個資料夾最後聽到的（CUE 不處理）
+                vm_resumeSave: function (id) {
+                    if (!id || String(id).indexOf('cue:') === 0) {
+                        return;
+                    }
+                    let dir = this.vm_resumeDir(id);
+                    let list = this.vm_resumeLoad().filter(e => this.vm_resumeDir(e.id) !== dir);
+                    list.push({ id: id, t: Date.now() });
+                    this.vm_resumeStore(list);
+                },
+                // 整張聽完：清掉這個資料夾的記錄
+                vm_resumeClear: function (id) {
+                    if (!id) {
+                        return;
+                    }
+                    let dir = this.vm_resumeDir(id);
+                    this.vm_resumeStore(this.vm_resumeLoad().filter(e => this.vm_resumeDir(e.id) !== dir));
+                },
+                // 進專輯頁：找出這張專輯上次聽到哪一首，標示並捲過去（正在播這張專輯、或沒有記錄就什麼都不做）
+                vm_resumeMark: function (res) {
+                    this.resumeId = '';
+                    if (!res || !res.current || res.current.kind !== 'album' || this.pendingPlayId) {
+                        return;
+                    }
+                    let ids = {};
+                    let add = list => (list || []).forEach(t => { if (t.type === 'music') { ids[t.id] = true; } });
+                    add(res.items);
+                    (res.discs || []).forEach(d => add(d.items));
+                    if (this.nowPlaying.id && ids[this.nowPlaying.id]) {
+                        return;
+                    }
+                    let best = null;
+                    this.vm_resumeLoad().forEach(e => { if (ids[e.id] && (!best || e.t > best.t)) { best = e; } });
+                    if (!best) {
+                        return;
+                    }
+                    this.resumeId = best.id;
+                    window.setTimeout(() => {
+                        this.$nextTick(() => {
+                            let el = document.querySelector('.track-resume');
+                            if (el && el.scrollIntoView) {
+                                let root = document.documentElement;
+                                let prev = root.style.scrollBehavior;
+                                root.style.scrollBehavior = 'auto';
+                                el.scrollIntoView({ block: 'center' });
+                                root.style.scrollBehavior = prev;
+                            }
+                        });
+                    }, 200);
                 },
                 // 清單重新載入後，播放中那首要重新標成「播放中」（否則離開再回來，聲音還在播、列上卻沒有標示）
                 vm_markPlaying: function (items, discs) {
@@ -4774,6 +4846,7 @@
                     this.discGroups = res.discs || null;
                     this.activeFilter = null;
                     this.breadcrumbs = breadcrumbs;
+                    this.vm_resumeMark(res);
 
                     this.footerMessage = message;
 
@@ -4937,6 +5010,7 @@
                                 self.vm_playMusic(nitem.get_url, nitem.id);
                             } else {
                                 console.log('no next song in queue');
+                                self.vm_resumeClear(self.nowPlaying.id);
                             }
                         });
                     } else {
@@ -5011,6 +5085,8 @@
                     this.nowPlaying.duration = 0;
                     // 每次開始播都重新計算「聽過」（同一首重播、單曲循環也各算一次）
                     this.playStat = { id: id, last: null, listened: 0, reported: false };
+                    this.resumeId = '';
+                    this.vm_resumeSave(id);
                     this.vm_setMediaSessionMode('audio');
                     this.vm_updateMediaSession();
 
