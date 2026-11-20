@@ -787,7 +787,7 @@
                         <div v-if="musicFolder.folderName && musicFolder.folderName !== musicFolder.title" style="color:#999; font-size:12px; word-break:break-all;">{{ musicFolder.folderName }}</div>
                     </div>
                     <div style="color:#888; font-size:13px; margin:4px 0 8px;">
-                        {{ musicFolder.tracks.length }} 首<span v-if="musicFolder.totalSeconds"> · {{ formatDuration(musicFolder.totalSeconds) }}</span><span v-if="musicFolder.year"> · {{ musicFolder.year }}</span><button v-if="albumNoteAddVisible" type="button" class="album-note-add" title="新增專輯介紹" v-on:click="vm_noteEdit()"><i class="fa fa-pen-to-square"></i></button>
+                        {{ musicFolder.tracks.length }} 首<span v-if="musicFolder.totalSeconds"> · {{ formatDuration(musicFolder.totalSeconds) }}</span><span v-if="musicFolder.year"> · {{ musicFolder.year }}</span><button v-if="albumNoteAddVisible" type="button" class="album-note-add" :title="albumNote ? '編輯專輯介紹' : '新增專輯介紹'" v-on:click="vm_noteEdit()"><i class="fa fa-pen-to-square"></i></button>
                     </div>
                     <div style="display:flex; flex-wrap:wrap; align-items:center; gap:8px;">
                         <button type="button" class="btn btn-success" v-on:click="vm_albumPlayClick()">
@@ -820,10 +820,6 @@
                     <span style="font-weight:bold; flex:1; cursor:pointer; user-select:none;" v-on:click="noteOpen = !noteOpen">
                         <i class="fa" :class="noteOpen || noteEditing ? 'fa-chevron-down' : 'fa-chevron-right'" style="font-size:12px; width:14px;"></i> 專輯介紹
                     </span>
-                    <template v-if="isAdmin && !noteEditing && albumNote">
-                        <button type="button" class="btn btn-sm btn-outline-secondary" title="編輯" v-on:click="vm_noteEdit()"><i class="fa fa-pen"></i> 編輯</button>
-                        <button type="button" class="btn btn-sm btn-outline-danger" title="清空介紹（刪除 README.md）" :disabled="noteSaving" v-on:click="vm_noteClear()"><i class="fa fa-trash"></i> 清空</button>
-                    </template>
                 </div>
                 <div v-if="noteEditing" style="padding:0 10px 10px;">
                     <textarea class="form-control" rows="12" v-model="noteDraft" :disabled="noteSaving"
@@ -1406,7 +1402,7 @@
                     transcodeNoteTimer: null,
                     currentRating: null,
                     albumNote: null,
-                    noteOpen: true,
+                    noteOpen: false,
                     noteEditing: false,
                     noteDraft: '',
                     noteSaving: false,
@@ -1907,7 +1903,7 @@
                     return this.albumNoteEligible && (!!this.albumNote || (this.isAdmin && this.noteEditing));
                 },
                 albumNoteAddVisible: function() {
-                    return this.albumNoteEligible && this.isAdmin && !this.albumNote && !this.noteEditing;
+                    return this.albumNoteEligible && this.isAdmin && !this.noteEditing;
                 },
                 musicGridVisible: function() {
                     return !!this.musicFolder && !this.showListView;
@@ -4345,7 +4341,7 @@
                         ' h264=' + can('video/mp4; codecs="avc1.640028, mp4a.40.2"') +
                         ' hevc=' + can('video/mp4; codecs="hvc1.1.6.L120.90, mp4a.40.2"'));
                 },
-                // ----- 專輯介紹（README.md）：管理者編輯／清空 -----
+                // ----- 專輯介紹（README.md）：管理者編輯（存空白＝清空） -----
                 vm_noteEdit: function () {
                     this.noteDraft = this.albumNote && this.albumNote.raw ? this.albumNote.raw : '';
                     this.noteError = '';
@@ -4374,12 +4370,6 @@
                     }).finally(() => {
                         this.noteSaving = false;
                     });
-                },
-                vm_noteClear: function () {
-                    if (!window.confirm('要清空這張專輯的介紹嗎？\n\n會刪除資料夾裡的 README.md，無法復原。')) {
-                        return;
-                    }
-                    this.vm_noteSave('');
                 },
                 // 介紹裡的連結一律另開分頁，不要離開目前的播放頁
                 vm_noteClick: function (ev) {
@@ -4769,6 +4759,7 @@
                     this.newsView = false;
                     this.currentRating = res.current || null;
                     this.albumNote = res.note || null;
+                    this.noteOpen = false;
                     this.noteEditing = false;
                     this.noteError = '';
                     this.vm_loadMediaInfo(res, items);
