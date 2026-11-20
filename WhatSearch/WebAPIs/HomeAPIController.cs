@@ -288,7 +288,11 @@ namespace WhatSearch.WebAPIs
                 string vtt = SubtitleConverter.ToWebVtt(System.IO.File.ReadAllBytes(targetPath), fileExt);
                 return this.Content(vtt, "text/vtt; charset=utf-8");
             }
-            if (config.PlayTypes.Contains(fileExt) == false)
+            // 影片類型（.avi/.wmv/.rmvb…）瀏覽器播不了，所以不在 playtypes 白名單；但「下載檔案」按鈕要能下載，
+            // 否則會拿到下面這段 404 文字，被瀏覽器存成 .txt。只放行「確實存在的影片檔」的下載，其它類型仍照白名單
+            bool videoDownload = download && Helper.GetFileDocType(fileExt) == Helper.ConstStrings.Video &&
+                                 System.IO.File.Exists(targetPath);
+            if (config.PlayTypes.Contains(fileExt) == false && videoDownload == false)
             {
                 return this.NotFound(string.Format("{0}　格式不支援{1}目前支援格式為: {2}",
                     fileExt,
