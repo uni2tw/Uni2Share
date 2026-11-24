@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Text.RegularExpressions;
 using NLog;
 using WhatSearch.Core;
 using WhatSearch.Utilities;
@@ -165,6 +166,41 @@ namespace WhatSearch.Services
             }
         }
 
+        /// <summary>關聯作品的排序：先依所在資料夾（季別，等於播出順序），同一個資料夾再依名稱；兩者都是自然排序（數字比大小，第2季在第10季前面）</summary>
+        public static readonly IComparer<RelatedWork> WorkOrder = Comparer<RelatedWork>.Create((a, b) =>
+        {
+            int c = NaturalCompare(a.Where, b.Where);
+            return c != 0 ? c : NaturalCompare(a.Title, b.Title);
+        });
+
+        static readonly Regex ChunkRegex = new Regex(@"\d+|\D+", RegexOptions.Compiled);
+
+        /// <summary>自然排序：把字串切成「數字」和「非數字」兩種片段逐段比；數字片段比數值，其餘片段用語系比較（不分大小寫）</summary>
+        internal static int NaturalCompare(string x, string y)
+        {
+            var xs = ChunkRegex.Matches(x ?? string.Empty).Cast<Match>().Select(m => m.Value).ToList();
+            var ys = ChunkRegex.Matches(y ?? string.Empty).Cast<Match>().Select(m => m.Value).ToList();
+            for (int i = 0; i < Math.Min(xs.Count, ys.Count); i++)
+            {
+                string a = xs[i], b = ys[i];
+                int c;
+                if (char.IsDigit(a[0]) && char.IsDigit(b[0]))
+                {
+                    string ta = a.TrimStart('0'), tb = b.TrimStart('0');
+                    c = ta.Length != tb.Length ? ta.Length.CompareTo(tb.Length) : string.CompareOrdinal(ta, tb);
+                }
+                else
+                {
+                    c = string.Compare(a, b, StringComparison.CurrentCultureIgnoreCase);
+                }
+                if (c != 0)
+                {
+                    return c;
+                }
+            }
+            return xs.Count.CompareTo(ys.Count);
+        }
+
         static string KeyOf(string folderName)
         {
             return RatingService.AnimeKey(folderName);
@@ -215,7 +251,7 @@ namespace WhatSearch.Services
             var idx = GetIndex();
             return LiveMembers(key, g, idx)
                 .Select(k => idx.ContainsKey(k) ? idx[k] : new RelatedWork { Key = k, Title = k, FolderId = null, Where = string.Empty })
-                .OrderBy(w => w.Title, StringComparer.CurrentCultureIgnoreCase)
+                .OrderBy(w => w, WorkOrder)
                 .ToList();
         }
 
@@ -231,7 +267,7 @@ namespace WhatSearch.Services
             {
                 return GetIndex().Values
                     .Where(w => w.Key != self && tokens.All(t => w.Title.IndexOf(t, StringComparison.OrdinalIgnoreCase) >= 0))
-                    .OrderBy(w => w.Title, StringComparer.CurrentCultureIgnoreCase)
+                    .OrderBy(w => w, WorkOrder)
                     .Take(Math.Max(1, max))
                     .ToList();
             }
