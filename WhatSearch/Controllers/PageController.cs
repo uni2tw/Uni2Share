@@ -140,6 +140,41 @@ namespace WhatSearch.Controllers
             return new { Success = 1 };
         }
 
+        /// <summary>管理者訊息：系統在背景做完事（例如 MKV 轉檔完成或失敗）留給管理者的站內訊息</summary>
+        [Route("admin/messages")]
+        [RoleAuthorize("Admin")]
+        public IActionResult MessagesPage()
+        {
+            return View("Messages");
+        }
+
+        [HttpGet]
+        [Route("admin/messages/data")]
+        [RoleAuthorize("Admin")]
+        public dynamic MessagesData()
+        {
+            AdminMessageSnapshot snap = Ioc.Get<IAdminMessageService>().Get();
+            return new { messages = snap.Messages, unread = snap.Unread, lastRead = snap.LastRead };
+        }
+
+        [HttpPost]
+        [Route("admin/messages/read")]
+        [RoleAuthorize("Admin")]
+        public dynamic MessagesRead()
+        {
+            Ioc.Get<IAdminMessageService>().MarkAllRead();
+            return new { Success = 1 };
+        }
+
+        [HttpPost]
+        [Route("admin/messages/clear")]
+        [RoleAuthorize("Admin")]
+        public dynamic MessagesClear()
+        {
+            Ioc.Get<IAdminMessageService>().Clear();
+            return new { Success = 1, Message = "已清除訊息" };
+        }
+
         [HttpPost]
         [Route("admin/security/clear")]
         [RoleAuthorize("Admin")]
@@ -331,7 +366,7 @@ namespace WhatSearch.Controllers
             return new { Success = 1, Message = string.Format("已解除 {0} 的鎖定", mem.DisplayName) };
         }
 
-        /// <summary>MKV 轉檔管理頁：被標註「無法播放」的動畫，把影片轉成 H.264 8-bit（原檔改名 .bak 保留）</summary>
+        /// <summary>MKV 轉檔管理頁：把不符合最保守播放標準的 MKV 轉成 H.264 8-bit＋AAC／MP3（影片已相容就只轉音訊；原檔放進 .backup 保留）</summary>
         [Route("admin/convert")]
         [RoleAuthorize("Admin")]
         public IActionResult ConvertPage()

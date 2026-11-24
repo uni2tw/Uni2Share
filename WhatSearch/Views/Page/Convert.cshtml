@@ -169,13 +169,15 @@
             MKV 轉檔
             <span style="margin-left:auto; display:flex; gap:6px;">
                 <a href="/admin" class="btn btn-sm btn-outline-secondary"><i class="fa fa-users"></i> 會員管理</a>
+                <a href="/admin/messages" class="btn btn-sm btn-outline-secondary"><i class="fa fa-envelope"></i> 管理者訊息</a>
                 <a href="/admin/ratings" class="btn btn-sm btn-outline-secondary"><i class="fa fa-star"></i> 評分管理</a>
             </span>
         </h1>
         <div style="font-size:13px; color:#666; margin:0 0 12px 0; line-height:1.7;">
-            這裡列出被標註「無法播放」的動畫。選擇要轉換的檔案後，系統會在伺服器上用 ffmpeg 把影片轉成瀏覽器能播的 H.264 8-bit、音訊轉成 AAC（原本就是 AAC 的直接複製），字幕與其它軌道保留，輸出仍是 MKV。
-            原檔會改名成 <code>檔名.mkv.bak</code> 留在原資料夾，轉出的檔案有問題時可以改回來；確認沒問題後再自己刪除備份。
-            全部轉完（資料夾裡的 MKV 都是 H.264 8-bit）會自動取消「無法播放」標註。
+            這裡列出被標註「無法播放」的動畫（在動畫資料夾頁看到「修正」鎚子按鈕，也可以直接一鍵排進轉檔，不用先標註）。系統用 ffmpeg 把 MKV 轉成最保守的播放標準：影片 H.264 8-bit、音訊 AAC 或 MP3。
+            影片已經符合就直接複製、只轉有問題的音軌（速度快很多）；原本是 AAC 或 MP3 的音軌也直接複製。字幕、字型附件、章節與 metadata 保留，輸出仍是 MKV。
+            原檔會搬進同資料夾的 <code>.backup</code>（隱藏資料夾，不會列出也不會被搜到），轉出的檔案有問題時可以搬回來；確認沒問題後再自己刪除備份。
+            一批都轉完會在「管理者訊息」留一則訊息；資料夾裡的 MKV 都符合標準時，會自動取消「無法播放」標註。
         </div>
 
         <div v-if="!enabled" class="alert alert-warning">伺服器沒有設定 ffmpeg（config 的 transcode.ffmpeg），無法轉檔。</div>
@@ -214,7 +216,7 @@
             <button type="button" class="btn btn-sm btn-outline-secondary" v-on:click="vm_loadFolders()" :disabled="loading"><i class="fa fa-rotate"></i> 重新整理</button>
             <span style="flex:1"></span>
             <button type="button" class="btn btn-sm btn-outline-secondary" v-if="selectedIds.length" v-on:click="vm_clearSelection()">清除選取</button>
-            <button type="button" class="btn btn-sm btn-danger" :disabled="!selectedIds.length || submitting || !enabled" v-on:click="vm_enqueue()"><i class="fa fa-film"></i> 轉換選取的 {{ selectedIds.length }} 個檔案</button>
+            <button type="button" class="btn btn-sm btn-danger" :disabled="!selectedIds.length || submitting || !enabled" v-on:click="vm_enqueue()"><i class="fa fa-hammer"></i> 轉換選取的 {{ selectedIds.length }} 個檔案</button>
         </div>
 
         <div v-if="loading && !folders.length" style="color:#888; padding:20px 0;">載入中…（要讀每個 MKV 的編碼，資料夾多時需要幾秒）</div>
@@ -243,8 +245,9 @@
                                 <span v-else-if="file.state === 'pending'" class="badge bg-secondary">排隊中</span>
                                 <span v-else-if="file.compatible" class="badge bg-success">已相容</span>
                                 <span v-else class="badge bg-warning text-dark">建議轉換</span>
+                                <span v-if="!file.compatible && file.plan" class="badge bg-light text-dark" title="影片已相容就只轉音訊，影片直接複製">{{ file.plan }}</span>
                                 <span v-if="file.state === 'failed'" class="badge bg-danger" title="上次轉換失敗，詳情看上方工作列表">上次失敗</span>
-                                <span v-if="file.hasBackup" class="badge bg-light text-dark" title="旁邊有 .bak 備份檔">有備份</span>
+                                <span v-if="file.hasBackup" class="badge bg-light text-dark" title=".backup 資料夾裡或旁邊有備份檔">有備份</span>
                             </td>
                         </tr>
                     </tbody>

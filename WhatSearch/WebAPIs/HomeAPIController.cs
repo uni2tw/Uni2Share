@@ -35,6 +35,7 @@ namespace WhatSearch.WebAPIs
         IRatingService ratingService = Ioc.Get<IRatingService>();
         IUnplayableService unplayableService = Ioc.Get<IUnplayableService>();
         IRelatedService relatedService = Ioc.Get<IRelatedService>();
+        IVideoConvertService videoConvertService = Ioc.Get<IVideoConvertService>();
         INewsService newsService = Ioc.Get<INewsService>();
         IAbnormalRequestService abnormalService = Ioc.Get<IAbnormalRequestService>();
         SystemConfig config = Ioc.GetConfig();
@@ -499,11 +500,17 @@ namespace WhatSearch.WebAPIs
                 info = MkvCodecInspector.Inspect(mkv.FullName);
                 Ioc.GetCache().Set(cacheKey, info, TimeSpan.FromHours(6));
             }
+            List<ConvertFile> fixFiles = (User.IsInRole("Admin") && ratingService.IsRateable(folderPath))
+                ? videoConvertService.GetFixFiles(folderPath) : new List<ConvertFile>();
             return new
             {
                 file = mkv.Name,
                 video = info.Video.Select(v => new { label = v.Label, mime = v.Mime, always_unsupported = v.AlwaysUnsupported }),
-                audio = info.Audio.Select(a => new { label = a.Label, mime = a.Mime, is_default = a.IsDefault })
+                audio = info.Audio.Select(a => new { label = a.Label, mime = a.Mime, is_default = a.IsDefault }),
+                // 管理者才有：資料夾裡不符合最保守播放標準的 MKV（影片不是 H.264 8-bit，或音軌不是 AAC／MP3），前端據此顯示「修正」按鈕
+                fix_count = fixFiles.Count,
+                fix_enabled = videoConvertService.Enabled,
+                fix_plans = fixFiles.Select(f => f.Name + "：" + f.Plan)
             };
         }
 
@@ -670,6 +677,45 @@ namespace WhatSearch.WebAPIs
             }
             logger.Info("更換封面：" + target + "（" + User.Identity.Name + "）");
             return Ok(new { ok = true });
+        }
+
+        /// <summary>管理者一鍵修正：把這個動畫資料夾裡不符合最保守播放標準的 MKV 全部排進轉檔佇列（影片已經相容就只轉音訊）；做完會留一則站內訊息</summary>
+        [HttpPost]
+        [Route("api/convertfix")]
+        [UserAuthorize]
+        public dynamic ConvertFix([FromBody] ConvertFixInputModel model)
+        {
+            if (User.IsInRole("Admin") == false)
+            {
+                return StatusCode(403);
+            }
+            if (model == null || string.IsNullOrEmpty(model.id))
+            {
+                return BadRequest("參數錯誤");
+            }
+            string folderPath = fimgr.GetPath(model.id);
+            if (string.IsNullOrEmpty(folderPath) || Directory.Exists(folderPath) == false)
+            {
+                return NotFound("找不到這個資料夾");
+            }
+            if (ratingService.IsRateable(folderPath) == false)
+            {
+                return BadRequest("只能修正動畫資料夾裡的 MKV");
+            }
+            string by = (User.Identity as System.Security.Claims.ClaimsIdentity)?.Label;
+            string error;
+            List<ConvertJob> queued = videoConvertService.EnqueueFolder(folderPath, string.IsNullOrEmpty(by) ? User.Identity.Name : by, out error);
+            if (queued.Count == 0)
+            {
+                return BadRequest(error ?? "沒有排入任何檔案");
+            }
+            logger.Info("MKV 修正：{0} 把 {1} 的 {2} 個檔案排進轉檔", User.Identity.Name, new DirectoryInfo(folderPath).Name, queued.Count);
+            return new { queued = queued.Count };
+        }
+
+        public class ConvertFixInputModel
+        {
+            public string id { get; set; }
         }
 
         // ----- 關聯推薦（跨季作品）：管理者設定，所有登入的人能看 -----
@@ -1099,7 +1145,8 @@ namespace WhatSearch.WebAPIs
                 // 是否為管理者（前端據此顯示「無法播放」註記按鈕）
                 Admin = User.Identity.IsAuthenticated && User.IsInRole("Admin"),
                 // 管理者還沒看的異常請求事件數（非管理者一律 0）
-                Alerts = (User.Identity.IsAuthenticated && User.IsInRole("Admin")) ? abnormalService.GetUnread() : 0,
+                // 加上管理者訊息（轉檔完成等）的未讀數
+                Alerts = (User.Identity.IsAuthenticated && User.IsInRole("Admin")) ? abnormalService.GetUnread() + Ioc.Get<IAdminMessageService>().GetUnread() : 0,
                 // 新上架的未讀數；沒登入或沒有啟用新上架為 null（前端據此決定要不要顯示入口）
                 News = (newsService.Enabled && User.Identity.IsAuthenticated) ? (int?)newsService.GetUnread(User.Identity.Name) : null
             };

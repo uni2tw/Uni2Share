@@ -141,3 +141,8 @@ api.relatedSearch = function(id, q) {
 api.setRelated = function(id, keys) {
     return axios.post('/api/related', { id: id, keys: keys });
 }
+
+// 管理者一鍵修正：把動畫資料夾裡不符合播放標準的 MKV 全部排進轉檔
+api.convertFix = function(id) {
+    return axios.post('/api/convertfix', { id: id });
+}
