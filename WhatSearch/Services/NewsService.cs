@@ -512,6 +512,11 @@ namespace WhatSearch.Services
 
         void Enqueue(string kind, string path, string oldPath)
         {
+            // 事件全部發生在隱藏資料夾裡（例如 .backup）：不用處理。從外面搬進去（改名）的，原路徑在外面，仍要處理
+            if (HiddenFolder.IsHiddenPath(path) && (oldPath == null || HiddenFolder.IsHiddenPath(oldPath)))
+            {
+                return;
+            }
             fsEvents.Enqueue(new FsEvent { Kind = kind, Path = path, OldPath = oldPath });
             signal.Set();
         }
@@ -675,7 +680,7 @@ namespace WhatSearch.Services
 
         static bool IsHidden(DirectoryInfo d)
         {
-            return d.Name.StartsWith(".") || d.Name.StartsWith("$") || d.Attributes.HasFlag(FileAttributes.Hidden);
+            return HiddenFolder.IsHiddenName(d.Name) || d.Attributes.HasFlag(FileAttributes.Hidden);
         }
 
         static bool IsDiscName(string name)

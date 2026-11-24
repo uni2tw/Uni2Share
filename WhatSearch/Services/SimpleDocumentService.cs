@@ -69,7 +69,7 @@ namespace WhatSearch.Services
                 return;
             }
             Stopwatch walk = Stopwatch.StartNew();
-            DirectoryInfo[] rootSubs = dirInfo.GetDirectories();
+            DirectoryInfo[] rootSubs = dirInfo.GetDirectories().Where(d => HiddenFolder.IsHiddenName(d.Name) == false).ToArray();
             AddWalkTicks(walk.ElapsedTicks);
             foreach (var subDirInfo in rootSubs)
             {
@@ -92,7 +92,7 @@ namespace WhatSearch.Services
                     return;
                 }
                 Stopwatch walk = Stopwatch.StartNew();
-                subDirInfos = dirInfo.GetDirectories();
+                subDirInfos = dirInfo.GetDirectories().Where(d => HiddenFolder.IsHiddenName(d.Name) == false).ToArray();
                 AddWalkTicks(walk.ElapsedTicks);
             }
             catch (Exception ex)
@@ -124,6 +124,11 @@ namespace WhatSearch.Services
 
         public override void AppendFolderOrFile(string fullPath)
         {
+            // 隱藏資料夾（.backup 之類）裡面的檔案、或隱藏資料夾本身，不建索引（檔案監看、重掃都會走到這裡）
+            if (HiddenFolder.IsHiddenPath(fullPath))
+            {
+                return;
+            }
             if (Directory.Exists(fullPath))
             {
                 SeekFolder(fullPath);

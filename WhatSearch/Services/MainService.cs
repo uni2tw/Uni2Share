@@ -36,7 +36,7 @@ namespace WhatSearch.Services
                 return result;
             }
 
-            foreach (var subDirInfo in dirInfo.GetDirectories())
+            foreach (var subDirInfo in dirInfo.GetDirectories().Where(d => HiddenFolder.IsHiddenName(d.Name) == false))
             {
                 string efid = fimgr.GetIdByFilePath(subDirInfo.FullName);
                 result.Add(new FileInfoView
@@ -329,7 +329,7 @@ namespace WhatSearch.Services
             List<Tuple<int, DirectoryInfo>> discs = new List<Tuple<int, DirectoryInfo>>();
             foreach (DirectoryInfo sub in dir.GetDirectories())
             {
-                if (sub.Attributes.HasFlag(FileAttributes.Hidden) || AuxFolderRegex.IsMatch(sub.Name))
+                if (sub.Attributes.HasFlag(FileAttributes.Hidden) || HiddenFolder.IsHiddenName(sub.Name) || AuxFolderRegex.IsMatch(sub.Name))
                 {
                     continue;
                 }
@@ -497,7 +497,7 @@ namespace WhatSearch.Services
                 string[] remaining = segs.Skip(i + 1).ToArray();
                 foreach (DirectoryInfo sibling in current.GetDirectories())
                 {
-                    if (sibling.Attributes.HasFlag(FileAttributes.Hidden))
+                    if (sibling.Attributes.HasFlag(FileAttributes.Hidden) || HiddenFolder.IsHiddenName(sibling.Name))
                     {
                         continue;
                     }
