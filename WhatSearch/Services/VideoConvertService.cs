@@ -22,6 +22,10 @@ namespace WhatSearch.Services
         List<ConvertFolder> ListFolders();
         /// <summary>把一個 MKV 排進轉檔佇列；不合格（不是 MKV、不在標註的動畫資料夾、已在佇列）回傳 null 並說明原因</summary>
         ConvertJob Enqueue(string fullPath, string by, out string error);
+        /// <summary>這個動畫資料夾裡不符合最保守播放標準（影片 H.264 8-bit、音訊 AAC 或 MP3）的 MKV，以及各自要怎麼轉（Plan）</summary>
+        List<ConvertFile> GetFixFiles(string folderPath);
+        /// <summary>把資料夾裡需要修正的 MKV 全部排進佇列；沒有排入任何檔案時回傳空清單並說明原因</summary>
+        List<ConvertJob> EnqueueFolder(string folderPath, string by, out string error);
         /// <summary>佇列與最近完成的工作（新到舊）</summary>
         List<ConvertJob> GetJobs();
         /// <summary>取消排隊中的工作，或中止轉檔中的 ffmpeg；找不到回傳 false</summary>
@@ -85,8 +89,10 @@ namespace WhatSearch.Services
         public string Video { get; set; }
         /// <summary>音訊軌的描述，多條以「、」分隔</summary>
         public string Audio { get; set; }
-        /// <summary>影片已經是 H.264 8-bit（多數瀏覽器能播），不需要轉換</summary>
+        /// <summary>符合最保守的播放標準（影片 H.264 8-bit，音訊 AAC 或 MP3），不需要轉換</summary>
         public bool Compatible { get; set; }
+        /// <summary>要怎麼轉：只轉音訊（影片直接複製）／只轉影片／影片＋音訊；不需要轉為 null</summary>
+        public string Plan { get; set; }
         /// <summary>旁邊已經有 .bak 備份（之前轉過）</summary>
         public bool HasBackup { get; set; }
         /// <summary>排隊中／轉檔中／最近失敗；沒有為 null</summary>
@@ -137,8 +143,10 @@ namespace WhatSearch.Services
     }
 
     /// <summary>
-    /// 把被標註「無法播放」的 MKV 轉成瀏覽器能播的格式：影片 H.264 8-bit，音訊 AAC（原本就是 AAC 的直接複製），其餘軌道（字幕、字型附件、章節）原樣保留，輸出仍是 MKV。
-    /// 流程：先轉成同資料夾的 xxx.mkv.tmp → 驗證（影片已是 H.264 8-bit、音訊軌數沒少、長度相近）→ 原檔改名 xxx.mkv.bak → 暫存檔改名成 xxx.mkv。
+    /// 把 MKV 轉成最保守的播放標準（影片 H.264 8-bit，音訊 AAC 或 MP3）：影片已經相容就直接複製、只轉有問題的音軌（速度快很多），
+    /// 音軌原本是 AAC 或 MP3 的也直接複製；其餘軌道（字幕、字型附件、章節、metadata）原樣保留，輸出仍是 MKV。
+    /// 流程：先轉成同資料夾的 xxx.mkv.tmp → 驗證（影片 H.264 8-bit、音訊都是 AAC 或 MP3、音軌與字幕軌數沒少、長度相近）→ 原檔搬進 .backup → 暫存檔改名成 xxx.mkv。
+    /// 一批工作都做完（佇列清空）時，留一則站內訊息給管理者。
     /// 檔名不變，所以評分、網址、書籤都不受影響；新檔的修改時間沿用原檔，不會被當成新上架。任何一步失敗都保留原檔。
     /// 一次只轉一個（單一背景執行緒）；佇列只放在記憶體，重新啟動後要再按一次。
     /// </summary>
@@ -275,6 +283,35 @@ namespace WhatSearch.Services
                 && (v.Label ?? string.Empty).Contains("-bit") == false;
         }
 
+        // 最保守的音訊標準：AAC 或 MP3（其餘轉成 AAC）
+        static bool IsAudioKeep(MkvStreamInfo a)
+        {
+            return a.Label == "AAC" || a.Label == "MP3";
+        }
+
+        public static bool IsAudioCompatible(MkvMediaInfo info)
+        {
+            return info.Audio.All(IsAudioKeep);
+        }
+
+        /// <summary>影片不是 H.264 8-bit，或有音軌不是 AAC／MP3</summary>
+        public static bool NeedsConversion(MkvMediaInfo info)
+        {
+            return IsVideoCompatible(info) == false || IsAudioCompatible(info) == false;
+        }
+
+        /// <summary>只轉音訊／只轉影片／影片＋音訊；不需要轉為 null</summary>
+        public static string PlanText(MkvMediaInfo info)
+        {
+            bool video = IsVideoCompatible(info) == false;
+            bool audio = IsAudioCompatible(info) == false;
+            if (video && audio)
+            {
+                return "影片＋音訊";
+            }
+            return video ? "只轉影片" : (audio ? "只轉音訊" : null);
+        }
+
         ConvertFile Describe(FileInfo f)
         {
             ConvertFile file = new ConvertFile
@@ -290,7 +327,8 @@ namespace WhatSearch.Services
                 MkvMediaInfo info = Inspect(f);
                 file.Video = info.Video.Count == 0 ? null : string.Join("、", info.Video.Select(v => v.Label));
                 file.Audio = info.Audio.Count == 0 ? null : string.Join("、", info.Audio.Select(a => a.Label));
-                file.Compatible = IsVideoCompatible(info);
+                file.Compatible = NeedsConversion(info) == false;
+                file.Plan = PlanText(info);
             }
             catch (Exception ex)
             {
@@ -370,9 +408,14 @@ namespace WhatSearch.Services
                 return null;
             }
             string folderPath = fi.DirectoryName;
-            if (ratingService.IsRateable(folderPath) == false || unplayableService.Get(ratingService.Resolve(fi.Directory.Name).Key) == null)
+            if (ratingService.IsRateable(folderPath) == false)
             {
-                error = "這個檔案所在的資料夾沒有被標註「無法播放」";
+                error = "只能轉換動畫資料夾裡的 MKV";
+                return null;
+            }
+            if (NeedsConversion(Inspect(fi)) == false)
+            {
+                error = "這個檔案已經符合最保守的播放標準（影片 H.264 8-bit、音訊 AAC 或 MP3），不需要轉換";
                 return null;
             }
             lock (gate)
@@ -405,6 +448,66 @@ namespace WhatSearch.Services
                 Monitor.PulseAll(gate);
                 return job;
             }
+        }
+
+        public List<ConvertFile> GetFixFiles(string folderPath)
+        {
+            List<ConvertFile> result = new List<ConvertFile>();
+            if (string.IsNullOrEmpty(folderPath) || Directory.Exists(folderPath) == false || ratingService.IsRateable(folderPath) == false)
+            {
+                return result;
+            }
+            foreach (FileInfo f in MkvFiles(new DirectoryInfo(folderPath)))
+            {
+                try
+                {
+                    if (NeedsConversion(Inspect(f)))
+                    {
+                        result.Add(Describe(f));
+                    }
+                }
+                catch (Exception ex)
+                {
+                    logger.Warn(ex, "檢查 MKV 是否需要修正失敗 {0}", f.FullName);
+                }
+            }
+            return result;
+        }
+
+        public List<ConvertJob> EnqueueFolder(string folderPath, string by, out string error)
+        {
+            error = null;
+            List<ConvertJob> queued = new List<ConvertJob>();
+            if (Enabled == false)
+            {
+                error = "伺服器沒有設定 ffmpeg";
+                return queued;
+            }
+            List<ConvertFile> files = GetFixFiles(folderPath);
+            if (files.Count == 0)
+            {
+                error = "這個資料夾裡沒有需要修正的 MKV";
+                return queued;
+            }
+            string firstError = null;
+            foreach (ConvertFile f in files)
+            {
+                string e;
+                ConvertJob job = Enqueue(Path.Combine(folderPath, f.Name), by, out e);
+                if (job != null)
+                {
+                    queued.Add(job);
+                }
+                else if (firstError == null)
+                {
+                    firstError = e;
+                }
+            }
+            if (queued.Count == 0)
+            {
+                error = firstError ?? "沒有排入任何檔案";
+            }
+            return queued;
         }
 
         // 只保留最近 MaxFinishedJobs 筆已結束的工作
@@ -505,6 +608,52 @@ namespace WhatSearch.Services
                 {
                     TrimCueCache();
                 }
+                NotifyIfIdle(job);
+            }
+        }
+
+        long lastNotifiedAt;
+
+        // MKV 轉檔的佇列清空時（一批做完），留一則站內訊息給管理者：成功幾個、失敗幾個與原因。取消的不算
+        void NotifyIfIdle(ConvertJob job)
+        {
+            if (job.Kind != ConvertJob.KindMkv)
+            {
+                return;
+            }
+            List<ConvertJob> batch;
+            lock (gate)
+            {
+                if (jobs.Any(j => j.Kind == ConvertJob.KindMkv && (j.State == ConvertJob.StatePending || j.State == ConvertJob.StateRunning)))
+                {
+                    return;
+                }
+                batch = jobs.Where(j => j.Kind == ConvertJob.KindMkv && (j.State == ConvertJob.StateDone || j.State == ConvertJob.StateFailed) && j.FinishedAt > lastNotifiedAt)
+                    .OrderBy(j => j.FinishedAt).ToList();
+                if (batch.Count == 0)
+                {
+                    return;
+                }
+                lastNotifiedAt = batch.Max(j => j.FinishedAt);
+            }
+            try
+            {
+                int done = batch.Count(j => j.State == ConvertJob.StateDone);
+                int failed = batch.Count - done;
+                string title = failed == 0
+                    ? "MKV 轉檔完成（" + done + " 個）"
+                    : "MKV 轉檔結束：成功 " + done + " 個、失敗 " + failed + " 個";
+                string text = string.Join("\n", batch.Take(8).Select(j =>
+                    (j.State == ConvertJob.StateFailed ? "失敗　" : string.Empty) + j.Folder + " / " + j.Name + "：" + j.Message));
+                if (batch.Count > 8)
+                {
+                    text += "\n…還有 " + (batch.Count - 8) + " 個";
+                }
+                Ioc.Get<IAdminMessageService>().Add("convert", title, text, failed > 0);
+            }
+            catch (Exception ex)
+            {
+                logger.Warn(ex, "留轉檔完成訊息失敗");
             }
         }
 
@@ -867,6 +1016,8 @@ namespace WhatSearch.Services
             }
             MkvMediaInfo srcInfo = MkvCodecInspector.Inspect(src.FullName);
             double? srcDuration = MatroskaSubtitleReader.GetDurationSeconds(src.FullName);
+            int srcSubtitles = MatroskaSubtitleReader.ListAllTracks(src.FullName).Count(t => t.Type == 17);
+            string plan = PlanText(srcInfo) ?? "不需轉換";
             string tmp = src.FullName + ".tmp";
             Stopwatch watch = Stopwatch.StartNew();
             try
@@ -880,7 +1031,7 @@ namespace WhatSearch.Services
                 {
                     return null;
                 }
-                error = Verify(tmp, srcInfo, srcDuration);
+                error = Verify(tmp, srcInfo, srcDuration, srcSubtitles);
                 if (error != null)
                 {
                     return error;
@@ -889,7 +1040,7 @@ namespace WhatSearch.Services
                 long oldBytes = src.Length;
                 string bak = SwapIn(src.FullName, tmp);
                 long newBytes = new FileInfo(src.FullName).Length;
-                job.Message = string.Format("{0} → {1}，原檔備份為 {2}\\{3}", Helper.GetReadableByteSize(oldBytes), Helper.GetReadableByteSize(newBytes), HiddenFolder.BackupName, Path.GetFileName(bak));
+                job.Message = string.Format("{0} → {1}（{2}），原檔備份為 {3}\\{4}", Helper.GetReadableByteSize(oldBytes), Helper.GetReadableByteSize(newBytes), plan, HiddenFolder.BackupName, Path.GetFileName(bak));
                 logger.Info("MKV 轉檔完成 {0}：{1}，耗時 {2:F1} 分鐘", src.FullName, job.Message, watch.Elapsed.TotalMinutes);
                 ClearMarkIfAllCompatible(src.Directory, job.FolderKey);
                 return null;
@@ -915,24 +1066,35 @@ namespace WhatSearch.Services
             List<string> args = new List<string>
             {
                 "-nostdin", "-hide_banner", "-loglevel", "error", "-y", "-progress", "pipe:1", "-i", src,
-                "-map", "0",
-                "-c:v", "libx264", "-preset", string.IsNullOrWhiteSpace(tc.VideoPreset) ? "medium" : tc.VideoPreset,
-                "-crf", Math.Max(0, Math.Min(51, tc.VideoCrf)).ToString(CultureInfo.InvariantCulture),
-                "-pix_fmt", "yuv420p",
-                "-c:a", "aac", "-b:a", Math.Max(64, tc.AudioBitrate).ToString(CultureInfo.InvariantCulture) + "k"
+                "-map", "0"
             };
+            if (IsVideoCompatible(srcInfo))
+            {
+                // 影片本來就能播：直接複製，只處理有問題的音軌，速度快很多，畫質也完全不變
+                args.AddRange(new[] { "-c:v", "copy" });
+            }
+            else
+            {
+                if (tc.VideoThreads > 0)
+                {
+                    args.Add("-threads");
+                    args.Add(Math.Min(tc.VideoThreads, 64).ToString(CultureInfo.InvariantCulture));
+                }
+                args.AddRange(new[]
+                {
+                    "-c:v", "libx264", "-preset", string.IsNullOrWhiteSpace(tc.VideoPreset) ? "medium" : tc.VideoPreset,
+                    "-crf", Math.Max(0, Math.Min(51, tc.VideoCrf)).ToString(CultureInfo.InvariantCulture),
+                    "-pix_fmt", "yuv420p"
+                });
+            }
+            args.AddRange(new[] { "-c:a", "aac", "-b:a", Math.Max(64, tc.AudioBitrate).ToString(CultureInfo.InvariantCulture) + "k" });
             for (int i = 0; i < srcInfo.Audio.Count; i++)
             {
-                if (srcInfo.Audio[i].Label == "AAC")
+                if (IsAudioKeep(srcInfo.Audio[i]))
                 {
                     args.Add("-c:a:" + i.ToString(CultureInfo.InvariantCulture));
-                    args.Add("copy");        // 原本就是 AAC：直接複製，不重編
+                    args.Add("copy");        // 原本就是 AAC 或 MP3：直接複製，不重編
                 }
-            }
-            if (tc.VideoThreads > 0)
-            {
-                args.Insert(args.IndexOf("-c:v"), "-threads");
-                args.Insert(args.IndexOf("-c:v"), Math.Min(tc.VideoThreads, 64).ToString(CultureInfo.InvariantCulture));
             }
             args.AddRange(new[] { "-c:s", "copy", "-c:t", "copy", "-max_muxing_queue_size", "4096", "-f", "matroska", tmp });
             foreach (string a in args)
@@ -995,7 +1157,7 @@ namespace WhatSearch.Services
         }
 
         // 轉出來的檔案要真的達到目的才換掉原檔
-        static string Verify(string tmp, MkvMediaInfo srcInfo, double? srcDuration)
+        static string Verify(string tmp, MkvMediaInfo srcInfo, double? srcDuration, int srcSubtitleCount)
         {
             FileInfo fi = new FileInfo(tmp);
             if (fi.Exists == false || fi.Length == 0)
@@ -1010,6 +1172,15 @@ namespace WhatSearch.Services
             if (info.Audio.Count < srcInfo.Audio.Count)
             {
                 return "轉出的檔案音訊軌變少了（原本 " + srcInfo.Audio.Count + " 條，現在 " + info.Audio.Count + " 條），已放棄";
+            }
+            if (IsAudioCompatible(info) == false)
+            {
+                return "轉出的檔案音訊軌仍有不是 AAC／MP3 的編碼，已放棄";
+            }
+            int subtitles = MatroskaSubtitleReader.ListAllTracks(tmp).Count(t => t.Type == 17);
+            if (subtitles < srcSubtitleCount)
+            {
+                return "轉出的檔案字幕軌變少了（原本 " + srcSubtitleCount + " 條，現在 " + subtitles + " 條），已放棄";
             }
             double? newDuration = MatroskaSubtitleReader.GetDurationSeconds(tmp);
             if (srcDuration.HasValue && newDuration.HasValue && Math.Abs(srcDuration.Value - newDuration.Value) > 3)
@@ -1060,14 +1231,14 @@ namespace WhatSearch.Services
             }
         }
 
-        // 資料夾裡所有 MKV 的影片都相容了，就自動取消「無法播放」標註
+        // 資料夾裡所有 MKV 都符合播放標準（影片與音訊）了，就自動取消「無法播放」標註
         void ClearMarkIfAllCompatible(DirectoryInfo dir, string key)
         {
             try
             {
                 foreach (FileInfo f in MkvFiles(dir))
                 {
-                    if (IsVideoCompatible(MkvCodecInspector.Inspect(f.FullName)) == false)
+                    if (NeedsConversion(MkvCodecInspector.Inspect(f.FullName)))
                     {
                         return;
                     }

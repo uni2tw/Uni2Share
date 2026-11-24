@@ -688,6 +688,20 @@
                 <i class="fa fa-rotate-left"></i> 取消無法播放
             </button>
         </div>
+        <div v-if="isAdmin && mediaInfo && (mediaInfo.fix_count > 0 || fixMsg)" style="padding:6px 5px 0; display:flex; align-items:center; flex-wrap:wrap; gap:6px 10px;">
+            <template v-if="fixMsg">
+                <span style="font-size:13px; color:#198754;"><i class="fa fa-circle-check"></i> {{ fixMsg }}</span>
+                <a href="/admin/convert" style="font-size:13px;">轉檔管理</a>
+            </template>
+            <template v-else>
+                <span style="font-size:13px; color:#b26a00;"><i class="fa fa-triangle-exclamation"></i> 有 {{ mediaInfo.fix_count }} 個 MKV 不符合最保守的播放標準（影片 H.264 8-bit、音訊 AAC 或 MP3）</span>
+                <button type="button" class="btn btn-sm btn-outline-danger" :disabled="fixBusy || !mediaInfo.fix_enabled"
+                    :title="mediaInfo.fix_enabled ? mediaInfo.fix_plans.join('\n') : '伺服器沒有設定 ffmpeg'" v-on:click="vm_fixFolder()">
+                    <i class="fa" :class="fixBusy ? 'fa-spinner fa-spin' : 'fa-hammer'"></i> 修正
+                </button>
+                <span v-if="fixError" style="font-size:13px; color:#dc3545;">{{ fixError }}</span>
+            </template>
+        </div>
         <div v-if="mediaHintWarnings.length > 0" class="media-hint" style="display:flex; align-items:flex-start; gap:10px;">
             <div style="flex:1 1 auto; min-width:0;">
                 <i class="fa fa-triangle-exclamation"></i> 你的瀏覽器可能無法正常播放這部：{{ mediaHintWarnings.join('；') }}
@@ -1477,6 +1491,9 @@
                     transcodeEnabled: false,
                     isAdmin: false,
                     mediaInfo: null,
+                    fixBusy: false,
+                    fixMsg: '',
+                    fixError: '',
                     flacOriginal: false,
                     transcodeNote: '',
                     transcodePollTimer: null,
@@ -2247,6 +2264,8 @@
                 // 進入動畫資料夾時，如果裡面有 MKV，向伺服器要第一個 MKV 的編碼資訊（結果依資料夾 id 對應，過期的回應不採用）
                 vm_loadMediaInfo: function (res, items) {
                     this.mediaInfo = null;
+                    this.fixMsg = '';
+                    this.fixError = '';
                     if (!res.current || res.current.kind !== 'anime' || !res.id || !items.some(t => t.type === 'video' && /\.mkv$/i.test(t.title))) {
                         return;
                     }
@@ -3220,6 +3239,23 @@
                         lines.forEach((l, i) => ctx.fillText(l, x + 5, y + 5 + i * 15));
                     }
                     ctx.restore();
+                },
+                // 管理者一鍵修正：把這個動畫資料夾裡不符合最保守播放標準的 MKV 全部排進轉檔（影片已相容就只轉音訊）
+                vm_fixFolder: function () {
+                    let id = this.currentRating ? this.currentRating.id : '';
+                    if (!id || this.fixBusy) {
+                        return;
+                    }
+                    this.fixBusy = true;
+                    this.fixError = '';
+                    api.convertFix(id).then(res => {
+                        this.fixMsg = '已排入 ' + res.data.queued + ' 個檔案轉檔，全部做完會傳訊息給管理者';
+                    }).catch(err => {
+                        let msg = err && err.response && typeof err.response.data === 'string' ? err.response.data : '';
+                        this.fixError = msg || '排入轉檔失敗，請稍後再試';
+                    }).finally(() => {
+                        this.fixBusy = false;
+                    });
                 },
                 // ----- 關聯推薦（跨季作品）：所有人看得到同組作品，只有管理者能設定 -----
                 // holder 是列表上的資料夾項目或目前頁面的 currentRating，存好後用來更新它的關聯數

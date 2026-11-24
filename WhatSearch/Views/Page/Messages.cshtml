@@ -1,0 +1,131 @@
+﻿@{
+    this.Layout = "_Layout.cshtml";
+}
+
+    <script type="text/javascript">
+        document.addEventListener('DOMContentLoaded', function () {
+            const App = {
+                data() {
+                    return {
+                        loaded: false,
+                        failed: false,
+                        data: null,
+                        // 載入當下的「上次已讀時間」：比它新的訊息這次畫面上標示「新」，載入後才把全部標成已讀
+                        seenBefore: 0
+                    }
+                },
+                computed: {
+                    messages: function () {
+                        return this.data ? this.data.messages : [];
+                    }
+                },
+                mounted: function () {
+                    this.vm_load();
+                },
+                methods: {
+                    vm_home: function () {
+                        location.href = '/page/';
+                    },
+                    vm_showAlert: function (text) {
+                        var el = document.querySelector('.alert');
+                        el.textContent = text;
+                        el.style.display = 'block';
+                        el.style.opacity = '1';
+                        window.setTimeout(function () {
+                            el.style.transition = 'opacity 0.4s';
+                            el.style.opacity = '0';
+                            window.setTimeout(function () {
+                                el.style.display = 'none';
+                            }, 400);
+                        }, 3000);
+                    },
+                    vm_load: function () {
+                        var self = this;
+                        axios.get('/admin/messages/data').then(function (res) {
+                            // 登入失效時伺服器會轉去登入頁，拿到的是 HTML 不是資料
+                            if (!res.data || !Array.isArray(res.data.messages)) {
+                                self.failed = true;
+                                return;
+                            }
+                            self.data = res.data;
+                            self.seenBefore = res.data.lastRead;
+                            self.failed = false;
+                            self.loaded = true;
+                            if (res.data.unread > 0) {
+                                axios.post('/admin/messages/read', {}).catch(function () { });
+                            }
+                        }).catch(function () {
+                            self.failed = true;
+                        });
+                    },
+                    vm_clear: function () {
+                        var self = this;
+                        if (!window.confirm('確定要清除所有訊息嗎？')) {
+                            return;
+                        }
+                        axios.post('/admin/messages/clear', {}).then(function (res) {
+                            var d = res.data || {};
+                            if (d.success === 1) {
+                                self.data.messages = [];
+                                self.data.unread = 0;
+                            }
+                            self.vm_showAlert(d.message || '清除失敗');
+                        }).catch(function () {
+                            self.vm_showAlert('清除失敗，請稍後再試');
+                        });
+                    },
+                    vm_isNew: function (m) {
+                        return m.time > this.seenBefore;
+                    },
+                    vm_time: function (ms) {
+                        return ms ? new Date(ms).toLocaleString() : '';
+                    }
+                }
+            };
+            window.app = Vue.createApp(App).mount('#main');
+        });
+    </script>
+
+<body>
+    <div id="main" class="container" style="max-width:1000px; padding-top:16px; padding-bottom:40px;" v-cloak>
+        <div class="alert alert-info" style="display:none; margin-bottom:10px"></div>
+        <h1 class="h3" style="display:flex; align-items:center; gap:10px;">
+            <button type="button" class="btn btn-sm btn-info" v-on:click="vm_home()" title="回首頁"><i class="fa fa-home"></i></button>
+            管理者訊息
+            <span style="margin-left:auto; display:flex; gap:6px;">
+                <a href="/admin" class="btn btn-sm btn-outline-secondary"><i class="fa fa-users"></i> 會員管理</a>
+                <a href="/admin/convert" class="btn btn-sm btn-outline-secondary"><i class="fa fa-film"></i> MKV 轉檔</a>
+            </span>
+        </h1>
+        <div style="font-size:13px; color:#666; margin:0 0 12px 0; line-height:1.7;">
+            系統在背景做完事（例如 MKV 轉檔完成或失敗）會在這裡留一則訊息，最多保留最新 200 則。開啟這一頁就視為已讀。
+            <span v-if="failed" style="color:#dc3545;"><i class="fa fa-triangle-exclamation"></i> 載入失敗</span>
+        </div>
+
+        <div v-if="!loaded" style="color:#888; padding:20px 0;">載入中…</div>
+
+        <div v-else>
+            <div style="display:flex; align-items:center; margin-bottom:8px;">
+                <span style="font-size:13px; color:#666;">共 {{ messages.length }} 則（新到舊）</span>
+                <span style="margin-left:auto; display:flex; gap:6px;">
+                    <button type="button" class="btn btn-sm btn-outline-secondary" v-on:click="vm_load()"><i class="fa fa-rotate"></i> 重新整理</button>
+                    <button type="button" class="btn btn-sm btn-outline-danger" :disabled="messages.length === 0" v-on:click="vm_clear()"><i class="fa fa-trash"></i> 清除訊息</button>
+                </span>
+            </div>
+            <div v-if="messages.length === 0" style="color:#888; padding:20px 0;">目前沒有訊息。</div>
+            <div v-else>
+                <div v-for="m in messages" :key="m.time + m.title" class="card" style="margin-bottom:8px;" :class="{'border-warning': vm_isNew(m)}">
+                    <div class="card-body" style="padding:10px 14px;">
+                        <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+                            <i class="fa" :class="m.error ? 'fa-circle-exclamation' : 'fa-circle-check'" :style="{color: m.error ? '#dc3545' : '#198754'}"></i>
+                            <span style="font-weight:bold;" :style="{color: m.error ? '#dc3545' : ''}">{{ m.title }}</span>
+                            <span v-if="vm_isNew(m)" class="badge bg-danger">新</span>
+                            <span style="margin-left:auto; font-size:12px; color:#888;">{{ vm_time(m.time) }}</span>
+                        </div>
+                        <div v-if="m.text" style="font-size:13px; color:#555; margin-top:4px; white-space:pre-line; word-break:break-all;">{{ m.text }}</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</body>
