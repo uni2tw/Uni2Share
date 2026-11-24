@@ -325,7 +325,7 @@ namespace WhatSearch.Services
         }
 
         // 與 Resolve 相同的 key 規則：去掉結尾星等、空白收斂
-        static string AnimeKey(string folderName)
+        internal static string AnimeKey(string folderName)
         {
             string plain = SuffixRegex.Replace(folderName ?? string.Empty, string.Empty).Trim();
             return SpaceRegex.Replace(plain, " ");

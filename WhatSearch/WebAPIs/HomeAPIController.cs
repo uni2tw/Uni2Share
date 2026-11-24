@@ -34,6 +34,7 @@ namespace WhatSearch.WebAPIs
         ITranscodeService transcodeService = Ioc.Get<ITranscodeService>();
         IRatingService ratingService = Ioc.Get<IRatingService>();
         IUnplayableService unplayableService = Ioc.Get<IUnplayableService>();
+        IRelatedService relatedService = Ioc.Get<IRelatedService>();
         INewsService newsService = Ioc.Get<INewsService>();
         IAbnormalRequestService abnormalService = Ioc.Get<IAbnormalRequestService>();
         SystemConfig config = Ioc.GetConfig();
@@ -169,6 +170,11 @@ namespace WhatSearch.WebAPIs
                     {
                         string childPath = fimgr.GetPath(item.Id);
                         ratingService.Apply(item, childPath, me);
+                        if (item.Rateable == true)
+                        {
+                            int related = relatedService.CountForName(Path.GetFileName(childPath.TrimEnd('\\', '/')));
+                            item.RelatedCount = related > 0 ? related : (int?)null;
+                        }
                         if (item.Rateable != true)
                         {
                             ratingService.ApplyAlbumListRating(item, childPath, me);        // 專輯：已評分的才在列表上顯示星星
@@ -185,7 +191,7 @@ namespace WhatSearch.WebAPIs
                     ratingService.Apply(self, folderPath, me);
                     RatingInfo animeInfo = ratingService.Resolve(new DirectoryInfo(folderPath).Name);
                     UnplayableInfo mark = unplayableService.Get(animeInfo.Key);
-                    currentRating = new { id = model.p, name = self.TitlePlain, rating = self.Rating, kind = "anime", unplayable = mark != null, unplayable_by = mark == null ? null : mark.By, unplayable_time = mark == null ? (long?)null : mark.Time };
+                    currentRating = new { id = model.p, name = self.TitlePlain, rating = self.Rating, kind = "anime", related = relatedService.CountForName(animeInfo.Plain), unplayable = mark != null, unplayable_by = mark == null ? null : mark.By, unplayable_time = mark == null ? (long?)null : mark.Time };
                 }
                 else if (ratingService.IsAlbumShare(folderPath) && (discs != null || items.Count(t => t.Type == Helper.ConstStrings.Music) >= 2))
                 {
@@ -664,6 +670,95 @@ namespace WhatSearch.WebAPIs
             }
             logger.Info("更換封面：" + target + "（" + User.Identity.Name + "）");
             return Ok(new { ok = true });
+        }
+
+        // ----- 關聯推薦（跨季作品）：管理者設定，所有登入的人能看 -----
+        object RelatedResult(string folderName, List<RelatedWork> related)
+        {
+            return new
+            {
+                name = ratingService.Resolve(folderName).Plain,
+                can_edit = User.IsInRole("Admin"),
+                items = related.Select(w => new { key = w.Key, title = w.Title, id = w.FolderId, where = w.Where })
+            };
+        }
+
+        /// <summary>這個動畫資料夾的關聯作品（同組的其他作品）</summary>
+        [HttpGet]
+        [Route("api/related")]
+        [UserAuthorize]
+        public dynamic GetRelated([FromQuery] string id)
+        {
+            string folderPath = string.IsNullOrEmpty(id) ? string.Empty : fimgr.GetPath(id);
+            if (string.IsNullOrEmpty(folderPath) || Directory.Exists(folderPath) == false || ratingService.IsRateable(folderPath) == false)
+            {
+                return NotFound();
+            }
+            string name = new DirectoryInfo(folderPath).Name;
+            return RelatedResult(name, relatedService.GetRelated(name));
+        }
+
+        /// <summary>管理者搜尋要加入關聯的動畫（名稱包含關鍵字，多個關鍵字用空白分隔）</summary>
+        [HttpGet]
+        [Route("api/related/search")]
+        [UserAuthorize]
+        public dynamic SearchRelated([FromQuery] string id, [FromQuery] string q)
+        {
+            if (User.IsInRole("Admin") == false)
+            {
+                return StatusCode(403);
+            }
+            string keyword = (q ?? string.Empty).Trim();
+            string folderPath = string.IsNullOrEmpty(id) ? string.Empty : fimgr.GetPath(id);
+            if (keyword.Length == 0 || keyword.Length > 100)
+            {
+                return BadRequest("參數錯誤");
+            }
+            if (string.IsNullOrEmpty(folderPath) || Directory.Exists(folderPath) == false || ratingService.IsRateable(folderPath) == false)
+            {
+                return NotFound();
+            }
+            var found = relatedService.Search(keyword, new DirectoryInfo(folderPath).Name, 30);
+            return new { items = found.Select(w => new { key = w.Key, title = w.Title, id = w.FolderId, where = w.Where }) };
+        }
+
+        /// <summary>管理者設定關聯：keys 是要留在同組的其他作品；沒列出的現有成員會被移出，新的會連同它原本的整組一起併入</summary>
+        [HttpPost]
+        [Route("api/related")]
+        [UserAuthorize]
+        public dynamic SetRelated([FromBody] RelatedInputModel model)
+        {
+            if (User.IsInRole("Admin") == false)
+            {
+                return StatusCode(403);
+            }
+            if (model == null || string.IsNullOrEmpty(model.id) || (model.keys != null && model.keys.Count > 200))
+            {
+                return BadRequest("參數錯誤");
+            }
+            string folderPath = fimgr.GetPath(model.id);
+            if (string.IsNullOrEmpty(folderPath) || Directory.Exists(folderPath) == false || ratingService.IsRateable(folderPath) == false)
+            {
+                return NotFound("找不到這個資料夾");
+            }
+            string name = new DirectoryInfo(folderPath).Name;
+            try
+            {
+                var result = relatedService.Apply(name, model.keys);
+                logger.Info("關聯推薦：{0} 設定 {1} 的關聯，現在共 {2} 個其他作品", User.Identity.Name, name, result.Count);
+                return RelatedResult(name, result);
+            }
+            catch (Exception ex)
+            {
+                logger.Error(ex, "儲存關聯推薦失敗");
+                return StatusCode(500, "儲存失敗，請稍後再試");
+            }
+        }
+
+        public class RelatedInputModel
+        {
+            public string id { get; set; }
+            public List<string> keys { get; set; }
         }
 
         /// <summary>設定動畫的評分（2.5～5、0.5 為一級，0 = 未評分）；id 是資料夾 id，需登入，且該資料夾必須是可評分的</summary>
