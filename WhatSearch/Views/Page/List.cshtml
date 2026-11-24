@@ -850,7 +850,7 @@
                     </span>
                 </div>
                 <div v-if="noteEditing" style="padding:0 10px 10px;">
-                    <textarea class="form-control" rows="12" v-model="noteDraft" :disabled="noteSaving"
+                    <textarea class="form-control" rows="12" v-model="noteDraft" :disabled="noteSaving" v-on:paste="vm_notePaste"
                         placeholder="貼上或輸入 Markdown 文字，例如每首歌的出處介紹…"></textarea>
                     <div style="display:flex; align-items:center; gap:8px; margin-top:8px; flex-wrap:wrap;">
                         <button type="button" class="btn btn-sm btn-success" :disabled="noteSaving" v-on:click="vm_noteSave(noteDraft)">
@@ -4710,6 +4710,41 @@
                     }).finally(() => {
                         this.noteSaving = false;
                     });
+                },
+                // 把表格列之間的空白行拿掉（網頁或文件複製來的表格常每列多一個空白行，Markdown 會因此不當成表格）
+                vm_stripTableBlankLines: function (text) {
+                    let lines = text.split(/\r?\n/);
+                    let isRow = s => s.trim().charAt(0) === '|';
+                    let out = [];
+                    for (let i = 0; i < lines.length; i++) {
+                        if (lines[i].trim() === '' && out.length > 0 && isRow(out[out.length - 1])) {
+                            let j = i;
+                            while (j < lines.length && lines[j].trim() === '') {
+                                j++;
+                            }
+                            if (j < lines.length && isRow(lines[j])) {
+                                i = j - 1;
+                                continue;
+                            }
+                        }
+                        out.push(lines[i]);
+                    }
+                    return out.join('\n');
+                },
+                // 貼上時自動處理：只有內容真的有被修正才接手貼上，其餘照瀏覽器預設行為
+                vm_notePaste: function (ev) {
+                    let text = ev.clipboardData ? ev.clipboardData.getData('text/plain') : '';
+                    if (!text) {
+                        return;
+                    }
+                    let fixed = this.vm_stripTableBlankLines(text);
+                    if (fixed === text.replace(/\r\n/g, '\n')) {
+                        return;
+                    }
+                    ev.preventDefault();
+                    let ta = ev.target;
+                    ta.setRangeText(fixed, ta.selectionStart, ta.selectionEnd, 'end');
+                    this.noteDraft = ta.value;
                 },
                 // 介紹裡的連結一律另開分頁，不要離開目前的播放頁
                 vm_noteClick: function (ev) {
