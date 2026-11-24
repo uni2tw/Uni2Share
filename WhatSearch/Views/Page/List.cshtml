@@ -311,6 +311,12 @@
     }
     /* 專輯介紹（資料夾裡的 README.md） */
     .album-note-head { position: sticky; top: var(--nav-h, 56px); z-index: 5; background: #fafafa; border-radius: 6px; }
+    .related-ico { margin-left: 8px; font-size: 14px; color: #3b82f6; cursor: pointer; }
+    .related-ico.related-none { color: #ccc; }
+    .related-ico:hover { color: #1d4ed8; }
+    .related-row { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-bottom: 1px solid #eee; }
+    .related-row:last-child { border-bottom: 0; }
+    .related-box { border: 1px solid #ddd; border-radius: 6px; }
     .album-note-add { border: 0; background: none; color: #bbb; padding: 0 6px; margin-left: 4px; font-size: 12px; cursor: pointer; }
     .album-note-add:hover { color: #666; }
     .album-note .markdown-body { font-size: 14px; padding: 4px 12px 10px; background: transparent; word-break: break-word; }
@@ -670,6 +676,10 @@
                 </span>
                 <span class="rating-num">{{ currentRating.rating > 0 ? currentRating.rating : '未評分' }}</span>
             </span>
+            <button v-if="currentRating.kind === 'anime' && (currentRating.related > 0 || isAdmin)" type="button" class="btn btn-sm btn-outline-secondary"
+                title="同一系列、放在不同資料夾的作品" v-on:click.stop="vm_openRelated(currentRating.id, currentRating.name, currentRating)">
+                <i class="fa fa-link"></i> 關聯推薦<span v-if="currentRating.related > 0"> ({{ currentRating.related }})</span>
+            </button>
         </div>
         <div v-if="currentRating && currentRating.kind === 'anime' && currentRating.unplayable" style="padding:6px 5px 0; display:flex; align-items:center; flex-wrap:wrap; gap:6px 10px;">
             <span class="unplay-tag" style="margin-left:0;"><i class="fa fa-ban"></i> 無法播放</span>
@@ -925,7 +935,7 @@
             </div>
             <div style="flex-grow:2; width:70%">
                 <div style="display:flex; flex-direction:column">
-                    <div style="font-size: 18px; line-height:20px;overflow:auto; white-space:nowrap">{{ item.rateable ? item.title_plain : item.title }}<span v-if="item.news_kind" class="news-new">{{ vm_newsBadgeText(item) }}</span><span v-if="item.unplayable" class="unplay-tag"><i class="fa fa-ban"></i> 無法播放</span></div>
+                    <div style="font-size: 18px; line-height:20px;overflow:auto; white-space:nowrap">{{ item.rateable ? item.title_plain : item.title }}<span v-if="item.news_kind" class="news-new">{{ vm_newsBadgeText(item) }}</span><span v-if="item.unplayable" class="unplay-tag"><i class="fa fa-ban"></i> 無法播放</span><i v-if="item.rateable && (item.related_count > 0 || isAdmin)" class="fa fa-link related-ico" :class="{'related-none': !(item.related_count > 0)}" :title="item.related_count > 0 ? ('關聯推薦（' + item.related_count + '）') : '設定關聯推薦'" v-on:click.stop="vm_openRelated(item.id, item.title_plain, item)"></i></div>
                     <div v-if="item.artist || item.album" style="font-size: 11px;line-height:14px; color:#999; overflow:auto; white-space:nowrap">{{ formatArtistAlbum(item) }}</div>
                     <div v-if="item.path" style="font-size: 11px;line-height:14px; color:#999; overflow:auto; white-space:nowrap">{{ item.path }}</div>
                     <div v-if="item.type === 'music' && item.transcode_state && item.transcode_state !== 'ready'" class="tc-badge" :class="'tc-' + item.transcode_state"><i v-if="item.transcode_state === 'pending'" class="fa fa-spinner fa-spin"></i> {{ vm_transcodeText(item) }}</div>
@@ -1235,6 +1245,72 @@
         </div>
     </div>
 
+    <div class="lightbox-overlay" v-if="relatedDlg">
+        <div class="lightbox-overlay-content" style="background:#fff; color:#222; border-radius:8px; padding:12px 14px; max-height:94%; overflow:auto; width:min(480px, 96vw);">
+            <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; position:sticky; top:-12px; z-index:2; background:#fff; margin:-12px 0 0; padding:12px 0 8px;">
+                <div style="font-weight:bold; min-width:0; word-break:break-all;">關聯推薦：{{ relatedDlg.name }}</div>
+                <button type="button" class="btn btn-sm btn-outline-secondary" v-on:click="vm_relatedClose()"><i class="fa fa-times"></i></button>
+            </div>
+            <div v-if="relatedDlg.loading" style="color:#888; padding:14px 0;"><i class="fa fa-spinner fa-spin"></i> 讀取中…</div>
+            <div v-else-if="relatedDlg.loadError" style="color:#dc3545; padding:8px 0; font-size:14px;">{{ relatedDlg.loadError }}</div>
+            <template v-else-if="relatedDlg.mode === 'view'">
+                <div class="related-box">
+                    <div v-for="w in relatedDlg.items" :key="w.key" class="related-row" :style="{cursor: w.id ? 'pointer' : 'default'}" v-on:click="vm_relatedGo(w)">
+                        <i class="fa fa-folder-open" style="color:orange; font-size:20px;"></i>
+                        <div style="flex:1; min-width:0;">
+                            <div style="font-size:15px; word-break:break-all;">{{ w.title }}</div>
+                            <div style="font-size:12px; color:#888;">{{ w.where }}</div>
+                        </div>
+                        <i v-if="w.id" class="fa fa-chevron-right" style="color:#bbb;"></i>
+                    </div>
+                    <div v-if="relatedDlg.items.length === 0" style="padding:12px; color:#888; font-size:14px;">還沒有關聯的作品</div>
+                </div>
+                <div v-if="relatedDlg.canEdit" style="margin-top:10px; text-align:right;">
+                    <button type="button" class="btn btn-sm btn-outline-secondary" v-on:click="vm_relatedEdit()"><i class="fa fa-pen"></i> 設定</button>
+                </div>
+            </template>
+            <template v-else>
+                <div style="font-size:12px; color:#888; margin-bottom:6px;">已關聯（取消勾選就會移除）</div>
+                <div class="related-box">
+                    <label v-for="w in relatedDlg.items" :key="w.key" class="related-row" style="cursor:pointer; margin:0;">
+                        <input type="checkbox" v-model="relatedDlg.sel[w.key]" style="width:16px; height:16px;" />
+                        <div style="flex:1; min-width:0;">
+                            <div style="font-size:14px; word-break:break-all;">{{ w.title }}</div>
+                            <div style="font-size:12px; color:#888;">{{ w.where }}</div>
+                        </div>
+                    </label>
+                    <div v-if="relatedDlg.items.length === 0" style="padding:10px 12px; color:#888; font-size:14px;">還沒有關聯的作品</div>
+                </div>
+                <div style="font-size:12px; color:#888; margin:12px 0 6px;">搜尋要加入的作品</div>
+                <form style="display:flex; gap:8px; margin-bottom:8px;" v-on:submit.prevent="vm_relatedSearch()">
+                    <input type="text" class="form-control form-control-sm" v-model="relatedDlg.query" maxlength="100" placeholder="作品名稱（多個關鍵字用空白分隔）" />
+                    <button type="submit" class="btn btn-sm btn-primary" style="white-space:nowrap;" :disabled="relatedDlg.searching"><i class="fa fa-search"></i> 搜尋</button>
+                </form>
+                <div v-if="relatedDlg.searching" style="color:#888; padding:6px 0;">搜尋中…</div>
+                <div v-else-if="relatedDlg.searchError" style="color:#dc3545; padding:6px 0; font-size:14px;">{{ relatedDlg.searchError }}</div>
+                <div v-else-if="relatedDlg.searched && vm_relatedNewResults().length === 0" style="color:#888; padding:6px 0; font-size:14px;">{{ relatedDlg.results.length > 0 ? '符合的作品都已經在上面的清單裡' : '找不到，換個關鍵字試試' }}</div>
+                <div v-else-if="vm_relatedNewResults().length > 0" class="related-box">
+                    <label v-for="w in vm_relatedNewResults()" :key="w.key" class="related-row" style="cursor:pointer; margin:0;">
+                        <input type="checkbox" v-model="relatedDlg.sel[w.key]" style="width:16px; height:16px;" />
+                        <div style="flex:1; min-width:0;">
+                            <div style="font-size:14px; word-break:break-all;">{{ w.title }}</div>
+                            <div style="font-size:12px; color:#888;">{{ w.where }}</div>
+                        </div>
+                    </label>
+                </div>
+                <div style="font-size:12px; color:#999; margin-top:8px;">加入時，那部作品原本的關聯組也會一起併進來；取消勾選只會把那一部移出這一組。</div>
+                <div v-if="relatedDlg.error" style="color:#dc3545; font-size:13px; margin-top:6px;">{{ relatedDlg.error }}</div>
+                <div style="display:flex; align-items:center; gap:8px; border-top:1px solid #eee; margin-top:10px; padding-top:10px;">
+                    <div style="flex:1; font-size:13px; color:#666;">{{ vm_relatedSummary() }}</div>
+                    <button type="button" class="btn btn-sm btn-outline-secondary" :disabled="relatedDlg.saving" v-on:click="vm_relatedClose()">取消</button>
+                    <button type="button" class="btn btn-sm btn-success" :disabled="relatedDlg.saving" v-on:click="vm_relatedSave()">
+                        <i class="fa" :class="relatedDlg.saving ? 'fa-spinner fa-spin' : 'fa-check'"></i> 確定
+                    </button>
+                </div>
+            </template>
+        </div>
+    </div>
+
     <div class="lightbox-overlay" v-if="coverEdit">
         <div class="lightbox-overlay-content" style="background:#fff; color:#222; border-radius:8px; padding:12px 14px; max-height:94%; overflow:auto; width:min(560px, 96vw);">
             <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; position:sticky; top:-12px; z-index:2; background:#fff; margin:-12px 0 0; padding:12px 0 8px;">
@@ -1450,6 +1526,7 @@
                     tierProgress: '',
                     tierPreview: null,
                     coverEdit: null,
+                    relatedDlg: null,
                     favAlbumMap: {},
                     pinMap: {},
                     pinMax: 50,
@@ -3143,6 +3220,126 @@
                         lines.forEach((l, i) => ctx.fillText(l, x + 5, y + 5 + i * 15));
                     }
                     ctx.restore();
+                },
+                // ----- 關聯推薦（跨季作品）：所有人看得到同組作品，只有管理者能設定 -----
+                // holder 是列表上的資料夾項目或目前頁面的 currentRating，存好後用來更新它的關聯數
+                vm_openRelated: function (id, name, holder) {
+                    if (!id) {
+                        return;
+                    }
+                    this.relatedDlg = { id: id, name: name || '', holder: holder, loading: true, loadError: '', canEdit: false, mode: 'view', items: [],
+                        query: '', results: [], searched: false, searching: false, searchError: '', sel: {}, saving: false, error: '' };
+                    // 取回 Vue 包過的物件：之後改它畫面才會更新，也才能跟 this.relatedDlg 比對是不是同一個視窗
+                    let dlg = this.relatedDlg;
+                    api.related(id).then(res => {
+                        if (this.relatedDlg !== dlg) {
+                            return;
+                        }
+                        dlg.name = res.data.name || dlg.name;
+                        dlg.canEdit = !!res.data.can_edit;
+                        dlg.items = res.data.items || [];
+                        dlg.loading = false;
+                        // 管理者開沒有關聯的作品：直接進編輯
+                        if (dlg.canEdit && dlg.items.length === 0) {
+                            this.vm_relatedEdit();
+                        }
+                    }).catch(err => {
+                        if (this.relatedDlg !== dlg) {
+                            return;
+                        }
+                        dlg.loading = false;
+                        dlg.loadError = err && err.response && err.response.status === 401 ? '請先登入' : '讀取失敗，請稍後再試';
+                    });
+                },
+                vm_relatedClose: function () {
+                    if (this.relatedDlg && this.relatedDlg.saving) {
+                        return;
+                    }
+                    this.relatedDlg = null;
+                },
+                vm_relatedGo: function (w) {
+                    if (!w || !w.id) {
+                        return;
+                    }
+                    this.relatedDlg = null;
+                    this.vm_getFolder(w.id, true);
+                },
+                vm_relatedEdit: function () {
+                    let dlg = this.relatedDlg;
+                    if (!dlg || !dlg.canEdit) {
+                        return;
+                    }
+                    dlg.sel = {};
+                    dlg.items.forEach(w => { dlg.sel[w.key] = true; });
+                    dlg.error = '';
+                    dlg.mode = 'edit';
+                },
+                vm_relatedSearch: function () {
+                    let dlg = this.relatedDlg;
+                    let q = dlg ? dlg.query.trim() : '';
+                    if (!dlg || !q) {
+                        return;
+                    }
+                    dlg.searching = true;
+                    dlg.searchError = '';
+                    api.relatedSearch(dlg.id, q).then(res => {
+                        if (this.relatedDlg !== dlg) {
+                            return;
+                        }
+                        dlg.results = res.data.items || [];
+                        dlg.searched = true;
+                    }).catch(() => {
+                        if (this.relatedDlg === dlg) {
+                            dlg.searchError = '搜尋失敗，請稍後再試';
+                        }
+                    }).finally(() => {
+                        dlg.searching = false;
+                    });
+                },
+                // 搜尋結果裡已經在「已關聯」清單的不重複列出
+                vm_relatedNewResults: function () {
+                    let dlg = this.relatedDlg;
+                    if (!dlg) {
+                        return [];
+                    }
+                    return dlg.results.filter(r => !dlg.items.some(i => i.key === r.key));
+                },
+                vm_relatedSummary: function () {
+                    let dlg = this.relatedDlg;
+                    if (!dlg) {
+                        return '';
+                    }
+                    let add = Object.keys(dlg.sel).filter(k => dlg.sel[k] && !dlg.items.some(i => i.key === k)).length;
+                    let rem = dlg.items.filter(i => !dlg.sel[i.key]).length;
+                    return add === 0 && rem === 0 ? '沒有變更' : ('新增 ' + add + ' 個、移除 ' + rem + ' 個');
+                },
+                vm_relatedSave: function () {
+                    let dlg = this.relatedDlg;
+                    if (!dlg || dlg.saving) {
+                        return;
+                    }
+                    dlg.saving = true;
+                    dlg.error = '';
+                    let keys = Object.keys(dlg.sel).filter(k => dlg.sel[k]);
+                    api.setRelated(dlg.id, keys).then(res => {
+                        let n = (res.data.items || []).length;
+                        let h = dlg.holder;
+                        if (h) {
+                            if (h.kind === 'anime') {
+                                h.related = n;
+                            } else {
+                                h.related_count = n > 0 ? n : null;
+                            }
+                        }
+                        if (this.relatedDlg === dlg) {
+                            this.relatedDlg = null;
+                        }
+                    }).catch(err => {
+                        let msg = err && err.response && typeof err.response.data === 'string' ? err.response.data : '';
+                        dlg.error = msg || '儲存失敗，請稍後再試';
+                    }).finally(() => {
+                        dlg.saving = false;
+                    });
                 },
                 vm_openCoverEdit: function () {
                     if (!this.canEditCover) {

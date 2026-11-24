@@ -128,3 +128,16 @@ api.transcodeStatus = function(ids, first) {
 api.newsRead = function() {
     return axios.post('/api/news/read', {});
 }
+
+// 關聯推薦（跨季作品）：看同組作品、管理者搜尋與儲存
+api.related = function(id) {
+    return axios.get('/api/related', { params: { id: id } });
+}
+
+api.relatedSearch = function(id, q) {
+    return axios.get('/api/related/search', { params: { id: id, q: q } });
+}
+
+api.setRelated = function(id, keys) {
+    return axios.post('/api/related', { id: id, keys: keys });
+}
