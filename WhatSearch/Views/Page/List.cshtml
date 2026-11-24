@@ -716,10 +716,11 @@
                 </button>
             </div>
         </div>
-        <div v-if="singleVideo && !videoFolder && videoCoverUrl" style="padding:10px 5px; display:flex; gap:14px; align-items:flex-start;">
+        <div v-if="singleVideo && !videoFolder && (videoCoverUrl || canEditCover)" style="padding:10px 5px; display:flex; gap:14px; align-items:flex-start;">
             <div class="cover-wrap" style="flex:0 0 auto; width:140px; cursor:pointer; position:relative;" v-on:click="vm_changeFolder(singleVideo)">
-                <img :src="videoCoverUrl" style="width:100%; border-radius:6px; display:block;" />
-                <button v-if="canEditCover" type="button" class="btn btn-sm btn-dark cover-edit-btn" style="position:absolute; right:6px; bottom:6px; padding:1px 8px;" title="搜尋並更換封面" v-on:click.stop="vm_openCoverEdit()"><i class="fa fa-image"></i> 改圖</button>
+                <img v-if="videoCoverUrl" :src="videoCoverUrl" style="width:100%; border-radius:6px; display:block;" />
+                <div v-else style="width:100%; aspect-ratio:2/3; border:1px dashed #aaa; border-radius:6px; display:flex; align-items:center; justify-content:center; color:#999; font-size:13px;">沒有封面</div>
+                <button v-if="canEditCover" type="button" class="btn btn-sm btn-dark" :class="{'cover-edit-btn': videoCoverUrl}" style="position:absolute; right:6px; bottom:6px; padding:1px 8px;" title="搜尋並更換封面" v-on:click.stop="vm_openCoverEdit()"><i class="fa fa-image"></i> 改圖</button>
             </div>
             <div style="flex:1; min-width:0;">
                 <div style="font-size:1.1rem; font-weight:bold; word-break:break-all;">{{ singleVideo.title }}</div>
