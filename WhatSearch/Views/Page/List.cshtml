@@ -3624,8 +3624,8 @@
                     return pinned.length === 0 ? list : pinned.concat(list.filter(t => !isPinned(t)));
                 },
                 vm_canPin: function (item) {
-                    // 排序為「預設」才能置頂（其他排序下置頂不生效，按鈕也不顯示）
-                    return this.isLoggedIn === true && item.type === 'folder' && !this.favView && !item.path && this.sortMode === 'default';
+                    // 排序為「預設」才能置頂（其他排序下置頂不生效，按鈕也不顯示）；搜尋結果也不顯示
+                    return this.isLoggedIn === true && item.type === 'folder' && !this.favView && !(this.searchIsVisible && this.searchPerformed) && !item.path && this.sortMode === 'default';
                 },
                 // 樂觀更新：先改畫面，伺服器失敗（含超過上限）再還原
                 vm_togglePin: function (id) {
