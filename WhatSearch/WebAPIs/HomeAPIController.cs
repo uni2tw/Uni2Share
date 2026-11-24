@@ -50,6 +50,7 @@ namespace WhatSearch.WebAPIs
             List<FileInfoView> items = new List<FileInfoView>();
             List<IndexedFileDoc> docs = searchService.Query(q, config.MaxSearchResult);
             HashSet<string> importedDirs = new HashSet<string>();
+            string me = User.Identity.IsAuthenticated ? User.Identity.Name : null;        // 評分是每人一份
             foreach (IndexedFileDoc doc in docs)
             {
                 if (importedDirs.Contains(doc.DirectoryName) == false)
@@ -59,6 +60,23 @@ namespace WhatSearch.WebAPIs
                     // 資料夾已不存在（索引裡還有舊紀錄）時會是 null，不要放進結果，否則前端的結果畫面會出錯
                     if (fiv != null)
                     {
+                        // 和瀏覽列表一樣，把這位使用者的評分星星填進資料夾（動畫、已評分的專輯）
+                        if (fiv.Type == Helper.ConstStrings.Folder && string.IsNullOrEmpty(fiv.Id) == false)
+                        {
+                            try
+                            {
+                                string childPath = fimgr.GetPath(fiv.Id);
+                                ratingService.Apply(fiv, childPath, me);
+                                if (fiv.Rateable != true)
+                                {
+                                    ratingService.ApplyAlbumListRating(fiv, childPath, me);
+                                }
+                            }
+                            catch (Exception ex)
+                            {
+                                logger.Warn(ex, "搜尋結果填入評分失敗: " + doc.DirectoryName);
+                            }
+                        }
                         items.Add(fiv);
                     }
                 }
