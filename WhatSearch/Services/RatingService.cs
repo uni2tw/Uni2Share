@@ -726,6 +726,10 @@ namespace WhatSearch.Services
         {
             foreach (string sub in Directory.EnumerateDirectories(dir))
             {
+                if (HiddenFolder.IsHiddenName(Path.GetFileName(sub)))
+                {
+                    continue;
+                }
                 if (exactDepth == false || level == depth)
                 {
                     keys.Add(keyOf(Path.GetFileName(sub)));

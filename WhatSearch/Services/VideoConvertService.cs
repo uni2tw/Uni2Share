@@ -227,7 +227,7 @@ namespace WhatSearch.Services
             List<DirectoryInfo> subs;
             try
             {
-                subs = dir.EnumerateDirectories().Where(d => d.Attributes.HasFlag(FileAttributes.Hidden) == false).ToList();
+                subs = dir.EnumerateDirectories().Where(d => d.Attributes.HasFlag(FileAttributes.Hidden) == false && HiddenFolder.IsHiddenName(d.Name) == false).ToList();
             }
             catch (Exception ex)
             {
@@ -313,7 +313,34 @@ namespace WhatSearch.Services
             string name = Path.GetFileName(fullPath);
             try
             {
-                return Directory.EnumerateFiles(dir, name + "*.bak").Any();
+                // 舊版的備份：同資料夾的 xxx.mkv.bak
+                if (Directory.EnumerateFiles(dir, name + "*.bak").Any())
+                {
+                    return true;
+                }
+                // 新版的備份：.backup 資料夾裡的 xxx.mkv，或同名加序號的 xxx.1.mkv
+                string backupDir = Path.Combine(dir, HiddenFolder.BackupName);
+                if (Directory.Exists(backupDir) == false)
+                {
+                    return false;
+                }
+                string baseName = Path.GetFileNameWithoutExtension(name);
+                string ext = Path.GetExtension(name);
+                return Directory.EnumerateFiles(backupDir).Any(f =>
+                {
+                    string fn = Path.GetFileName(f);
+                    if (string.Equals(fn, name, StringComparison.OrdinalIgnoreCase))
+                    {
+                        return true;
+                    }
+                    string prefix = baseName + ".";
+                    if (fn.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) == false || fn.EndsWith(ext, StringComparison.OrdinalIgnoreCase) == false)
+                    {
+                        return false;
+                    }
+                    int len = fn.Length - prefix.Length - ext.Length;
+                    return len > 0 && fn.Substring(prefix.Length, len).All(char.IsDigit);
+                });
             }
             catch
             {
@@ -862,7 +889,7 @@ namespace WhatSearch.Services
                 long oldBytes = src.Length;
                 string bak = SwapIn(src.FullName, tmp);
                 long newBytes = new FileInfo(src.FullName).Length;
-                job.Message = string.Format("{0} → {1}，原檔備份為 {2}", Helper.GetReadableByteSize(oldBytes), Helper.GetReadableByteSize(newBytes), Path.GetFileName(bak));
+                job.Message = string.Format("{0} → {1}，原檔備份為 {2}\\{3}", Helper.GetReadableByteSize(oldBytes), Helper.GetReadableByteSize(newBytes), HiddenFolder.BackupName, Path.GetFileName(bak));
                 logger.Info("MKV 轉檔完成 {0}：{1}，耗時 {2:F1} 分鐘", src.FullName, job.Message, watch.Elapsed.TotalMinutes);
                 ClearMarkIfAllCompatible(src.Directory, job.FolderKey);
                 return null;
@@ -992,13 +1019,17 @@ namespace WhatSearch.Services
             return null;
         }
 
-        /// <summary>原檔改名成 .bak，再把暫存檔改成原檔名；回傳備份檔的完整路徑。第二步失敗會把原檔改回來</summary>
+        /// <summary>原檔搬進同資料夾的 .backup（保留原檔名，之前已經有同名的就加序號，不覆蓋），再把暫存檔改成原檔名；回傳備份檔的完整路徑。第二步失敗會把原檔搬回來</summary>
         static string SwapIn(string original, string tmp)
         {
-            string bak = original + ".bak";
+            string backupDir = Path.Combine(Path.GetDirectoryName(original), HiddenFolder.BackupName);
+            Directory.CreateDirectory(backupDir);
+            string bak = Path.Combine(backupDir, Path.GetFileName(original));
+            string baseName = Path.GetFileNameWithoutExtension(original);
+            string ext = Path.GetExtension(original);
             for (int n = 1; File.Exists(bak); n++)
             {
-                bak = original + "." + n + ".bak";        // 之前已經有備份：不覆蓋
+                bak = Path.Combine(backupDir, baseName + "." + n + ext);        // 之前已經有備份：不覆蓋
             }
             MoveWithRetry(original, bak);        // 有人正在串流這個檔案時會被鎖住，所以重試
             try
