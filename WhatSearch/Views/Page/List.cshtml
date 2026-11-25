@@ -1169,7 +1169,7 @@
     </div>
 
     <div class="lightbox-overlay" v-if="playStats" v-on:click.self="playStats = null">
-        <div class="lightbox-overlay-content" style="background:#fff; color:#222; border-radius:8px; padding:14px 16px; max-width:560px; max-height:88vh; overflow-y:auto;">
+        <div class="lightbox-overlay-content" style="background:#fff; color:#222; border-radius:8px; padding:14px 16px; max-width:560px; max-height:calc(100vh - 32px); max-height:calc(100dvh - 32px); overflow-y:auto;">
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
                 <div style="font-weight:bold;"><i class="fa fa-chart-simple"></i> 聽歌統計</div>
                 <button type="button" class="btn btn-sm btn-outline-secondary" v-on:click="playStats = null"><i class="fa fa-times"></i></button>
