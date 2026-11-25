@@ -111,6 +111,18 @@ api.setCover = function(id, url) {
     return axios.post('/api/coverset', { id: id, url: url });
 }
 
+// 管理者用自己的圖片當封面：上傳／貼上的圖片檔，或貼上圖片網址（伺服器去下載）
+api.uploadCover = function(id, file) {
+    var form = new FormData();
+    form.append('id', id);
+    form.append('file', file, file.name || 'cover');
+    return axios.post('/api/coverupload', form);
+}
+
+api.setCoverFromUrl = function(id, url) {
+    return axios.post('/api/coverurl', { id: id, url: url });
+}
+
 // 管理者儲存專輯介紹（資料夾裡的 README.md）；text 是空白就是清空（刪檔）
 api.saveAlbumNote = function(id, text) {
     return axios.post('/api/albumnote', { id: id, text: text });
