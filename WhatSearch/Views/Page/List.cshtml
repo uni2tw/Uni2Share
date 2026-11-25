@@ -319,6 +319,9 @@
     .related-box { border: 1px solid #ddd; border-radius: 6px; }
     .album-note-add { border: 0; background: none; color: #bbb; padding: 0 6px; margin-left: 4px; font-size: 12px; cursor: pointer; }
     .album-note-add:hover { color: #666; }
+    .cover-paste { border: 2px dashed #aaa; border-radius: 6px; padding: 10px 12px; min-height: 48px; font-size: 16px; line-height: 1.4; background: #fafafa; outline: none; word-break: break-all; }
+    .cover-paste:empty::before { content: attr(data-placeholder); color: #888; }
+    .cover-paste:focus, .cover-paste.drag { border-color: #0d6efd; background: #f0f6ff; }
     .album-note .markdown-body { font-size: 14px; padding: 4px 12px 10px; background: transparent; word-break: break-word; }
     .album-note .markdown-body img { max-width: 100%; }
     .album-note textarea { font-family: Consolas, Menlo, monospace; font-size: 13px; }
@@ -1349,6 +1352,20 @@
             </form>
             <div v-if="coverEdit.isAlbum" style="font-size:12px; color:#888; margin:6px 0;">從 iTunes 與 MusicBrainz（Cover Art Archive）找專輯封面候選。選一張就會存成這個資料夾的 cover.jpg（已經有的會被覆蓋）。</div>
             <div v-else style="font-size:12px; color:#888; margin:6px 0;">從 AniList、Bangumi（中文名稱比較查得到）與 Kitsu 找候選圖。選一張就會存成這個資料夾的 cover.jpg（已經有的會被覆蓋）。</div>
+            <div style="margin:8px 0 6px; padding:8px 10px; border:1px solid #ddd; border-radius:6px; background:#fcfcfc;">
+                <div style="display:flex; align-items:center; gap:6px; flex-wrap:wrap; margin-bottom:6px;">
+                    <span style="font-size:13px; font-weight:bold;">找不到或不滿意？自己提供圖片</span>
+                    <button type="button" class="btn btn-sm btn-outline-secondary" v-on:click="vm_coverGoogle()"><i class="fa fa-up-right-from-square"></i> 用 Google 找圖</button>
+                    <button type="button" class="btn btn-sm btn-outline-secondary" :disabled="coverEdit.saving" v-on:click="$refs.coverFile.click()"><i class="fa fa-image"></i> 選擇照片</button>
+                    <input ref="coverFile" type="file" accept="image/*" style="display:none;" v-on:change="vm_coverPick($event)" />
+                </div>
+                <div class="cover-paste" contenteditable="true" spellcheck="false" autocapitalize="off" autocorrect="off"
+                    data-placeholder="點這裡，長按選「貼上」：貼上圖片，或貼上圖片網址（電腦也可直接拖進來）"
+                    v-on:paste="vm_coverPaste($event)" v-on:drop="vm_coverDrop($event)" v-on:dragover.prevent v-on:keydown="vm_coverKey($event)"></div>
+                <div style="font-size:12px; color:#888; margin-top:4px; line-height:1.5;">
+                    手機：在 Google 圖片長按圖片 →「拷貝」，回來貼上；也可以先存到相簿再按「選擇照片」。貼網址請貼<b>原網站</b>的圖片網址，不收 Google 的網址。支援 JPEG、PNG、WebP，會自動轉成 JPEG 並存成 cover.jpg。
+                </div>
+            </div>
             <div v-if="coverEdit.warning" style="color:#b26a00; font-size:12px; margin-bottom:6px;"><i class="fa fa-triangle-exclamation"></i> {{ coverEdit.warning }}</div>
             <div v-if="coverEdit.loading" style="color:#888; padding:14px 0;">搜尋中…</div>
             <div v-else-if="coverEdit.error" style="color:#dc3545; padding:8px 0; font-size:14px;">{{ coverEdit.error }}</div>
@@ -3432,13 +3449,17 @@
                     });
                 },
                 vm_applyCover: function (candidate) {
+                    this.vm_coverRun(st => api.setCover(st.folderId, candidate.image));
+                },
+                // 更換封面的共用流程：送出（候選圖、上傳、網址）→ 成功就更新畫面上的封面並關閉視窗
+                vm_coverRun: function (send) {
                     let st = this.coverEdit;
                     if (!st || st.loading || st.saving) {
                         return;
                     }
                     st.saving = true;
                     st.error = '';
-                    api.setCover(st.folderId, candidate.image).then(() => {
+                    send(st).then(() => {
                         st.saving = false;
                         // 帶時間參數避免瀏覽器用舊的封面；這個網址伺服器會直接讀資料夾裡現在的 cover
                         this.videoCoverUrl = '/api/foldercover?id=' + encodeURIComponent(st.folderId) + '&t=' + Date.now();
@@ -3448,6 +3469,90 @@
                         st.saving = false;
                         st.error = (err.response && typeof err.response.data === 'string' && err.response.data) || '儲存失敗，請稍後再試';
                     });
+                },
+                // 另開分頁用 Google 圖片搜尋（由使用者自己在瀏覽器操作；伺服器不會去碰 Google）
+                vm_coverGoogle: function () {
+                    let st = this.coverEdit;
+                    if (!st) {
+                        return;
+                    }
+                    let q = (st.keyword + ' ' + (st.isAlbum ? st.artist + ' album cover' : '封面 poster')).replace(/\s+/g, ' ').trim();
+                    window.open('https://www.google.com/search?tbm=isch&q=' + encodeURIComponent(q), '_blank', 'noopener,noreferrer');
+                },
+                vm_coverUploadFile: function (file) {
+                    if (!file) {
+                        return;
+                    }
+                    if (file.type && file.type.indexOf('image/') !== 0) {
+                        this.coverEdit.error = '這不是圖片檔';
+                        return;
+                    }
+                    if (file.size > 20 * 1024 * 1024) {
+                        this.coverEdit.error = '圖片太大（上限 20 MB）';
+                        return;
+                    }
+                    this.vm_coverRun(st => api.uploadCover(st.folderId, file));
+                },
+                vm_coverFromUrl: function (url) {
+                    this.vm_coverRun(st => api.setCoverFromUrl(st.folderId, url));
+                },
+                vm_coverPick: function (ev) {
+                    let input = ev.target;
+                    let file = input.files && input.files[0];
+                    input.value = '';
+                    this.vm_coverUploadFile(file);
+                },
+                // 貼上：剪貼簿有圖片就上傳；是文字就當圖片網址；兩者都不是就提示
+                vm_coverPaste: function (ev) {
+                    ev.preventDefault();
+                    let st = this.coverEdit;
+                    let cd = ev.clipboardData;
+                    if (!st || !cd) {
+                        return;
+                    }
+                    let file = null;
+                    let items = cd.items || [];
+                    for (let i = 0; i < items.length; i++) {
+                        if (items[i].kind === 'file' && items[i].type.indexOf('image/') === 0) {
+                            file = items[i].getAsFile();
+                            break;
+                        }
+                    }
+                    if (!file && cd.files && cd.files.length > 0 && cd.files[0].type.indexOf('image/') === 0) {
+                        file = cd.files[0];
+                    }
+                    if (file) {
+                        this.vm_coverUploadFile(file);
+                        return;
+                    }
+                    let text = (cd.getData('text/plain') || '').trim();
+                    if (/^https?:\/\//i.test(text)) {
+                        this.vm_coverFromUrl(text);
+                        return;
+                    }
+                    st.error = '剪貼簿裡沒有圖片或圖片網址（在 Google 圖片請長按圖片選「拷貝」）';
+                },
+                vm_coverDrop: function (ev) {
+                    ev.preventDefault();
+                    let dt = ev.dataTransfer;
+                    if (!dt) {
+                        return;
+                    }
+                    if (dt.files && dt.files.length > 0) {
+                        this.vm_coverUploadFile(dt.files[0]);
+                        return;
+                    }
+                    let text = (dt.getData('text/uri-list') || dt.getData('text/plain') || '').split('\n')[0].trim();
+                    if (/^https?:\/\//i.test(text)) {
+                        this.vm_coverFromUrl(text);
+                    }
+                },
+                // 貼上區只用來接貼上／拖放，不讓人在裡面打字（貼上區不留內容）
+                vm_coverKey: function (ev) {
+                    if (ev.ctrlKey || ev.metaKey || ev.key === 'Tab' || ev.key.indexOf('Arrow') === 0) {
+                        return;
+                    }
+                    ev.preventDefault();
                 },
                 vm_openPlayStats: function () {
                     let days = 30;

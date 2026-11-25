@@ -661,6 +661,12 @@ namespace WhatSearch.WebAPIs
             {
                 return StatusCode(502, ex.Message);
             }
+            return WriteCoverFile(folderPath, data, "候選圖");
+        }
+
+        /// <summary>把 JPEG 位元組寫成資料夾裡的 cover.jpg（已有就覆蓋）；先寫到系統暫存目錄再取代，失敗不會留下半張圖</summary>
+        IActionResult WriteCoverFile(string folderPath, byte[] data, string how)
+        {
             string target = Path.Combine(folderPath, "cover.jpg");
             // 暫存檔放在系統暫存目錄：放在分享資料夾裡，檔案監看器會先看到它再被改名，白白建一筆索引
             string temp = Path.Combine(Path.GetTempPath(), "uni2share-cover-" + Guid.NewGuid().ToString("N") + ".tmp");
@@ -675,8 +681,118 @@ namespace WhatSearch.WebAPIs
                 try { System.IO.File.Delete(temp); } catch (Exception) { }
                 return StatusCode(500, "寫入失敗，請確認資料夾可以寫入");
             }
-            logger.Info("更換封面：" + target + "（" + User.Identity.Name + "）");
+            logger.Info("更換封面（" + how + "）：" + target + "（" + User.Identity.Name + "）");
             return Ok(new { ok = true });
+        }
+
+        /// <summary>自己提供圖片的共用檢查：管理者、資料夾存在、支援換封面。通過回傳 null</summary>
+        IActionResult CheckCoverTarget(string id, out string folderPath)
+        {
+            folderPath = null;
+            if (User.IsInRole("Admin") == false)
+            {
+                return StatusCode(403);
+            }
+            if (string.IsNullOrEmpty(id))
+            {
+                return BadRequest("參數錯誤");
+            }
+            try
+            {
+                folderPath = fimgr.GetPath(id);
+            }
+            catch (FormatException)
+            {
+                // id 不是合法的資料夾編碼
+                folderPath = null;
+            }
+            if (string.IsNullOrEmpty(folderPath) || Directory.Exists(folderPath) == false)
+            {
+                return NotFound("找不到這個資料夾");
+            }
+            if (IsCoverFolder(id, folderPath) == false)
+            {
+                return BadRequest("這個資料夾不支援更換封面");
+            }
+            return null;
+        }
+
+        const long CoverUploadMaxBytes = 20 * 1024 * 1024;
+
+        /// <summary>
+        /// 管理者用自己的圖片當封面：手機上「複製圖片」後貼上、選照片，或電腦拖放。伺服器轉成 JPEG（必要時縮小）存成 cover.jpg。
+        /// </summary>
+        [HttpPost]
+        [Route("api/coverupload")]
+        [UserAuthorize]
+        [RequestSizeLimit(22 * 1024 * 1024)]
+        public async Task<IActionResult> UploadCover([FromForm] string id, [FromForm] Microsoft.AspNetCore.Http.IFormFile file)
+        {
+            IActionResult error = CheckCoverTarget(id, out string folderPath);
+            if (error != null)
+            {
+                return error;
+            }
+            if (file == null || file.Length == 0)
+            {
+                return BadRequest("沒有收到圖片");
+            }
+            if (file.Length > CoverUploadMaxBytes)
+            {
+                return BadRequest("圖片太大（上限 20 MB）");
+            }
+            byte[] raw;
+            using (MemoryStream ms = new MemoryStream())
+            {
+                await file.CopyToAsync(ms);
+                raw = ms.ToArray();
+            }
+            return await SaveCoverFromRawAsync(folderPath, raw, "上傳圖片");
+        }
+
+        /// <summary>
+        /// 管理者貼上圖片網址當封面：伺服器去該網址下載（不收 Google 網域、不連內網位址），轉成 JPEG 存成 cover.jpg。
+        /// </summary>
+        [HttpPost]
+        [Route("api/coverurl")]
+        [UserAuthorize]
+        public async Task<IActionResult> SetCoverFromUrl([FromBody] CoverSetInputModel model)
+        {
+            IActionResult error = CheckCoverTarget(model?.id, out string folderPath);
+            if (error != null)
+            {
+                return error;
+            }
+            ICoverImportService import = Ioc.Get<ICoverImportService>();
+            byte[] raw;
+            try
+            {
+                raw = await import.DownloadAsync(model.url);
+            }
+            catch (InvalidOperationException ex)
+            {
+                return StatusCode(502, ex.Message);
+            }
+            return await SaveCoverFromRawAsync(folderPath, raw, "圖片網址");
+        }
+
+        async Task<IActionResult> SaveCoverFromRawAsync(string folderPath, byte[] raw, string how)
+        {
+            byte[] jpeg;
+            try
+            {
+                jpeg = await Ioc.Get<ICoverImportService>().ToJpegAsync(raw);
+            }
+            catch (InvalidOperationException ex)
+            {
+                return BadRequest(ex.Message);
+            }
+            catch (Exception ex)
+            {
+                logger.Warn(ex, "處理封面圖片失敗");
+                return BadRequest("圖片處理失敗，請換一張圖試試");
+            }
+            return WriteCoverFile(folderPath, jpeg, how);
         }
 
         /// <summary>管理者一鍵修正：把這個動畫資料夾裡不符合最保守播放標準的 MKV 全部排進轉檔佇列（影片已經相容就只轉音訊）；做完會留一則站內訊息</summary>

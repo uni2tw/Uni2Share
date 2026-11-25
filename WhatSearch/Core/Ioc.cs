@@ -36,6 +36,7 @@ namespace WhatSearch.Core
             builder.RegisterType<PlaybackMonitorService>().As<IPlaybackMonitorService>().SingleInstance();
             builder.RegisterType<FolderCoverService>().As<IFolderCoverService>().SingleInstance();
             builder.RegisterType<CoverSearchService>().As<ICoverSearchService>().SingleInstance();
+            builder.RegisterType<CoverImportService>().As<ICoverImportService>().SingleInstance();
             builder.RegisterType<RatingService>().As<IRatingService>().SingleInstance();
             builder.RegisterType<UnplayableService>().As<IUnplayableService>().SingleInstance();
             builder.RegisterType<RelatedService>().As<IRelatedService>().SingleInstance();
